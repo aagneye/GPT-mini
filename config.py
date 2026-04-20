@@ -5,7 +5,7 @@ block_size = 128
 max_iters = 5000
 eval_interval = 200
 learning_rate = 3e-4
-device = "cuda" 
+device = "cuda" if __import__('torch').cuda.is_available() else "cpu" 
 
 n_embd = 128
 n_head = 4
