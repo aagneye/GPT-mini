@@ -48,19 +48,40 @@ def save_checkpoint(path, step):
 
 start_step = 0
 checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "step_*.pth"))
+resumed = False
+
+
+def try_resume(path, include_optimizer=True):
+    global start_step
+    checkpoint = torch.load(path, map_location=device)
+    if checkpoint.get("vocab_size") != tokenizer.vocab_size:
+        raise ValueError(
+            f"vocab mismatch (checkpoint={checkpoint.get('vocab_size')}, current={tokenizer.vocab_size})"
+        )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    if include_optimizer and "optimizer_state_dict" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    start_step = checkpoint.get("step", -1) + 1
+
+
 if checkpoint_files:
     latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-    checkpoint = torch.load(latest_checkpoint, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    start_step = checkpoint["step"] + 1
-    print(f"Resumed from {latest_checkpoint} at step {start_step}")
-elif os.path.exists("model.pth"):
-    checkpoint = torch.load("model.pth", map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    start_step = checkpoint.get("step", 0) + 1
-    print(f"Resumed from model.pth at step {start_step}")
-else:
+    try:
+        try_resume(latest_checkpoint, include_optimizer=True)
+        resumed = True
+        print(f"Resumed from {latest_checkpoint} at step {start_step}")
+    except (RuntimeError, KeyError, ValueError) as e:
+        print(f"Skipping incompatible checkpoint {latest_checkpoint}: {e}")
+
+if (not resumed) and os.path.exists("model.pth"):
+    try:
+        try_resume("model.pth", include_optimizer=True)
+        resumed = True
+        print(f"Resumed from model.pth at step {start_step}")
+    except (RuntimeError, KeyError, ValueError) as e:
+        print(f"Skipping incompatible model.pth: {e}")
+
+if not resumed:
     print("Starting training from scratch")
 
 for iter in range(start_step, max_iters):
