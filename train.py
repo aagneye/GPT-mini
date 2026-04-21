@@ -8,7 +8,7 @@ import random
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-tokenizer = SPTokenizer(text)
+tokenizer = SPTokenizer()
 data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
 
 # split

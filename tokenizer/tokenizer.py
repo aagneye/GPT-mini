@@ -10,7 +10,7 @@ class SPTokenizer:
 
         # train tokenizer if not exists
         if not os.path.exists(self.model_file):
-            print("🔧 Training SentencePiece tokenizer...")
+            print("Training SentencePiece tokenizer...")
             spm.SentencePieceTrainer.train(
                 input=data_path,
                 model_prefix=model_prefix,
