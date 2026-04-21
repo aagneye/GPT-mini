@@ -1,6 +1,6 @@
 import torch
 from model.gpt import GPT
-from tokenizer.tokenizer import CharTokenizer
+from tokenizer.tokenizer import SPTokenizer
 from config import *
 import random
 
@@ -8,7 +8,7 @@ import random
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-tokenizer = CharTokenizer(text)
+tokenizer = SPTokenizer(text)
 data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
 
 # split
@@ -43,8 +43,6 @@ for iter in range(max_iters):
 torch.save({
     "model_state_dict": model.state_dict(),
     "vocab_size": tokenizer.vocab_size,
-    "stoi": tokenizer.stoi,
-    "itos": tokenizer.itos
 }, "model.pth")
 
 print("✅ Model saved as model.pth")
