@@ -3,6 +3,8 @@ from model.gpt import GPT
 from tokenizer.tokenizer import SPTokenizer
 from config import *
 import random
+import os
+import glob
 
 # load data
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
@@ -27,8 +29,41 @@ def get_batch(split):
 
 model = GPT(tokenizer.vocab_size).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+checkpoint_dir = "checkpoints"
+checkpoint_every = 500
+os.makedirs(checkpoint_dir, exist_ok=True)
 
-for iter in range(max_iters):
+
+def save_checkpoint(path, step):
+    torch.save(
+        {
+            "step": step,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "vocab_size": tokenizer.vocab_size,
+        },
+        path,
+    )
+
+
+start_step = 0
+checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "step_*.pth"))
+if checkpoint_files:
+    latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+    checkpoint = torch.load(latest_checkpoint, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    start_step = checkpoint["step"] + 1
+    print(f"Resumed from {latest_checkpoint} at step {start_step}")
+elif os.path.exists("model.pth"):
+    checkpoint = torch.load("model.pth", map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    start_step = checkpoint.get("step", 0) + 1
+    print(f"Resumed from model.pth at step {start_step}")
+else:
+    print("Starting training from scratch")
+
+for iter in range(start_step, max_iters):
     xb, yb = get_batch("train")
 
     logits, loss = model(xb, yb)
@@ -40,9 +75,11 @@ for iter in range(max_iters):
     if iter % 100 == 0:
         print(f"step {iter}, loss {loss.item()}")
 
-torch.save({
-    "model_state_dict": model.state_dict(),
-    "vocab_size": tokenizer.vocab_size,
-}, "model.pth")
+    if (iter + 1) % checkpoint_every == 0:
+        checkpoint_path = os.path.join(checkpoint_dir, f"step_{iter + 1}.pth")
+        save_checkpoint(checkpoint_path, iter)
+        print(f"Saved checkpoint: {checkpoint_path}")
+
+save_checkpoint("model.pth", max_iters - 1)
 
 print("✅ Model saved as model.pth")
