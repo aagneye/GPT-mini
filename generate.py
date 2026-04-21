@@ -2,13 +2,13 @@ import torch
 import torch.nn.functional as F
 from model.gpt import GPT
 from config import *
-
+from tokenizer.tokenizer import SPTokenizer
 
 checkpoint = torch.load("model.pth", map_location=device)
 vocab_size = checkpoint["vocab_size"]
 stoi = checkpoint["stoi"]
 itos = checkpoint["itos"]
-
+tokenizer = SPTokenizer()
 
 def encode(s):
     return [stoi[c] for c in s]
@@ -43,8 +43,8 @@ model.eval()
 print("Model loaded")
 
 prompt = "Hello"
-context = torch.tensor([encode(prompt)], dtype=torch.long).to(device)
+context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
 out = generate(model, context, max_new_tokens=200)
 
 print("\nGenerated text:\n")
-print(decode(out[0].tolist()))
+print(tokenizer.decode(out[0].tolist()))
