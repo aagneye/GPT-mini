@@ -39,3 +39,12 @@ for iter in range(max_iters):
 
     if iter % 100 == 0:
         print(f"step {iter}, loss {loss.item()}")
+
+torch.save({
+    "model_state_dict": model.state_dict(),
+    "vocab_size": tokenizer.vocab_size,
+    "stoi": tokenizer.stoi,
+    "itos": tokenizer.itos
+}, "model.pth")
+
+print("✅ Model saved as model.pth")
