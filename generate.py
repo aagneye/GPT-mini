@@ -6,16 +6,7 @@ from tokenizer.tokenizer import SPTokenizer
 
 checkpoint = torch.load("model.pth", map_location=device)
 vocab_size = checkpoint["vocab_size"]
-stoi = checkpoint["stoi"]
-itos = checkpoint["itos"]
 tokenizer = SPTokenizer()
-
-def encode(s):
-    return [stoi[c] for c in s]
-
-
-def decode(tokens):
-    return "".join([itos[i] for i in tokens])
 
 
 def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
