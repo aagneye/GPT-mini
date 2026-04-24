@@ -3,10 +3,33 @@ import torch.nn.functional as F
 from model.gpt import GPT
 from config import *
 from tokenizer.tokenizer import SPTokenizer
+import hashlib
 
 checkpoint = torch.load("model.pth", map_location=device)
 vocab_size = checkpoint["vocab_size"]
 tokenizer = SPTokenizer()
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+if vocab_size != tokenizer.vocab_size:
+    raise ValueError(
+        f"Tokenizer/model vocab mismatch: checkpoint={vocab_size}, tokenizer={tokenizer.vocab_size}"
+    )
+
+expected_tokenizer_hash = checkpoint.get("tokenizer_model_sha256")
+if expected_tokenizer_hash is not None:
+    current_tokenizer_hash = file_sha256(tokenizer.model_file)
+    if expected_tokenizer_hash != current_tokenizer_hash:
+        raise ValueError(
+            "Tokenizer mismatch: checkpoint was trained with a different tokenizer/spm.model file."
+        )
 
 
 def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
