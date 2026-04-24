@@ -14,8 +14,13 @@ class SPTokenizer:
             spm.SentencePieceTrainer.train(
                 input=data_path,
                 model_prefix=model_prefix,
-                vocab_size=vocab_size,
-                character_coverage=1.0
+                vocab_size=4000,              # increase vocab
+                character_coverage=0.9995,    # better for English
+                model_type="bpe",             # IMPORTANT
+                unk_id=0,
+                pad_id=1,
+                bos_id=2,
+                eos_id=3,
             )
 
         # load tokenizer
