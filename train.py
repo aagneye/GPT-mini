@@ -104,7 +104,7 @@ if (not resumed) and os.path.exists("model.pth"):
 if not resumed:
     print("Starting training from scratch")
 
-for iter in range(start_step, max_iters):
+for step_idx in range(start_step, max_iters):
     xb, yb = get_batch("train")
 
     logits, loss = model(xb, yb)
@@ -113,12 +113,12 @@ for iter in range(start_step, max_iters):
     loss.backward()
     optimizer.step()
 
-    if iter % 100 == 0:
-        print(f"step {iter}, loss {loss.item()}")
+    if step_idx % 100 == 0:
+        print(f"step {step_idx}, loss {loss.item()}")
 
-    if (iter + 1) % checkpoint_every == 0:
-        checkpoint_path = os.path.join(checkpoint_dir, f"step_{iter + 1}.pth")
-        save_checkpoint(checkpoint_path, iter)
+    if (step_idx + 1) % checkpoint_every == 0:
+        checkpoint_path = os.path.join(checkpoint_dir, f"step_{step_idx + 1}.pth")
+        save_checkpoint(checkpoint_path, step_idx)
         print(f"Saved checkpoint: {checkpoint_path}")
 
 save_checkpoint("model.pth", max_iters - 1)
