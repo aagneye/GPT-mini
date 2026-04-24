@@ -14,7 +14,7 @@ class SPTokenizer:
             spm.SentencePieceTrainer.train(
                 input=data_path,
                 model_prefix=model_prefix,
-                vocab_size=4000,              # increase vocab
+                vocab_size=vocab_size,
                 character_coverage=0.9995,    # better for English
                 model_type="bpe",             # IMPORTANT
                 unk_id=0,
@@ -28,9 +28,10 @@ class SPTokenizer:
         self.sp.load(self.model_file)
 
         self.vocab_size = self.sp.get_piece_size()
+        self.unk_id = self.sp.unk_id()
 
     def encode(self, text):
-        return self.sp.encode(text)
+        return self.sp.encode(text, out_type=int)
 
     def decode(self, tokens):
-        return self.sp.decode(tokens)
+        return self.sp.decode([int(t) for t in tokens])
