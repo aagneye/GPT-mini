@@ -10,6 +10,9 @@ import glob
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
+# Clean WikiText section separators.
+text = text.replace("= = =", "")
+
 tokenizer = SPTokenizer()
 data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
 
