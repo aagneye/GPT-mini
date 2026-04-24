@@ -5,6 +5,7 @@ from config import *
 import random
 import os
 import glob
+import hashlib
 
 # load data
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
@@ -37,6 +38,14 @@ checkpoint_every = 500
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def save_checkpoint(path, step):
     torch.save(
         {
@@ -44,6 +53,7 @@ def save_checkpoint(path, step):
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "vocab_size": tokenizer.vocab_size,
+            "tokenizer_model_sha256": file_sha256(tokenizer.model_file),
         },
         path,
     )
@@ -61,6 +71,13 @@ def try_resume(path, include_optimizer=True):
         raise ValueError(
             f"vocab mismatch (checkpoint={checkpoint.get('vocab_size')}, current={tokenizer.vocab_size})"
         )
+    expected_tokenizer_hash = checkpoint.get("tokenizer_model_sha256")
+    if expected_tokenizer_hash is not None:
+        current_tokenizer_hash = file_sha256(tokenizer.model_file)
+        if expected_tokenizer_hash != current_tokenizer_hash:
+            raise ValueError(
+                "tokenizer mismatch (checkpoint tokenizer file hash does not match current tokenizer/spm.model)"
+            )
     model.load_state_dict(checkpoint["model_state_dict"])
     if include_optimizer and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
