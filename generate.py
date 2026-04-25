@@ -61,4 +61,17 @@ context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
 out = generate(model, context, max_new_tokens=200)
 
 print("\nGenerated text:\n")
-print(tokenizer.decode(out[0].tolist()))
+# Debug: Check for invalid token IDs
+tokens = out[0].tolist()
+unk_count = sum(1 for t in tokens if t == tokenizer.unk_id)
+invalid_tokens = [t for t in tokens if t >= vocab_size or t < 0]
+
+print(f"Vocab size: {vocab_size}")
+print(f"Unknown token ID: {tokenizer.unk_id}")
+print(f"Unknown tokens in output: {unk_count}/{len(tokens)} ({100*unk_count/len(tokens):.1f}%)")
+if invalid_tokens:
+    print(f"WARNING: Found {len(invalid_tokens)} invalid token IDs: {invalid_tokens[:10]}")
+print(f"Max token ID generated: {max(tokens)}")
+print(f"\nFirst 20 token IDs: {tokens[:20]}")
+print()
+print(tokenizer.decode(tokens))

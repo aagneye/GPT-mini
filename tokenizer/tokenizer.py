@@ -4,7 +4,7 @@ import sentencepiece as spm
 import os
 
 class SPTokenizer:
-    def __init__(self, data_path="data/dataset.txt", model_prefix="tokenizer/spm", vocab_size=2000):
+    def __init__(self, data_path="data/dataset.txt", model_prefix="tokenizer/spm", vocab_size=16000):
         
         self.model_file = model_prefix + ".model"
 
