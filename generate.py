@@ -5,7 +5,7 @@ from config import *
 from tokenizer.tokenizer import SPTokenizer
 import hashlib
 
-checkpoint = torch.load("model.pth", map_location=device)
+checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
 vocab_size = checkpoint["vocab_size"]
 tokenizer = SPTokenizer()
 
@@ -33,11 +33,20 @@ if expected_tokenizer_hash is not None:
 
 
 def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
+    banned_ids = [tokenizer.unk_id]
+    # Avoid generating sentence boundary tokens as plain text output.
+    if tokenizer.sp.bos_id() >= 0:
+        banned_ids.append(tokenizer.sp.bos_id())
+    if tokenizer.sp.pad_id() >= 0:
+        banned_ids.append(tokenizer.sp.pad_id())
+
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -block_size:]
         logits, _ = model(idx_cond)
 
         logits = logits[:, -1, :] / temperature
+        for token_id in banned_ids:
+            logits[:, token_id] = float("-inf")
         probs = torch.softmax(logits, dim=-1)
 
         # top-k filtering

@@ -47,3 +47,9 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+#dataset import
+prepare_openwebtext.py
+
+#dataset
+data/
