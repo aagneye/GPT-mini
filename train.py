@@ -11,11 +11,12 @@ import hashlib
 with open("data/dataset.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-# Clean WikiText section separators.
-text = text.replace("= = =", "")
+print(f"Dataset loaded: {len(text):,} characters")
 
 tokenizer = SPTokenizer()
+print("Tokenizing dataset...")
 data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
+print(f"Total tokens: {len(data):,}")
 
 # split
 n = int(0.9 * len(data))
@@ -104,6 +105,12 @@ if (not resumed) and os.path.exists("model.pth"):
 if not resumed:
     print("Starting training from scratch")
 
+print(f"\nTraining for {max_iters:,} iterations")
+print(f"Dataset tokens: {len(data):,}")
+print(f"Tokens per batch: {batch_size * block_size:,}")
+print(f"Total tokens to process: {max_iters * batch_size * block_size:,}")
+print()
+
 for step_idx in range(start_step, max_iters):
     xb, yb = get_batch("train")
 
@@ -114,7 +121,7 @@ for step_idx in range(start_step, max_iters):
     optimizer.step()
 
     if step_idx % 100 == 0:
-        print(f"step {step_idx}, loss {loss.item()}")
+        print(f"step {step_idx}, loss {loss.item():.4f}")
 
     if (step_idx + 1) % checkpoint_every == 0:
         checkpoint_path = os.path.join(checkpoint_dir, f"step_{step_idx + 1}.pth")
