@@ -2,20 +2,43 @@ import torch
 from model.gpt import GPT
 from tokenizer.tokenizer import SPTokenizer
 from config import *
-import random
 import os
 import glob
 import hashlib
 
-# load data
-with open("data/dataset.txt", "r", encoding="utf-8") as f:
-    text = f.read()
-
-print(f"Dataset loaded: {len(text):,} characters")
-
 tokenizer = SPTokenizer()
-print("Tokenizing dataset...")
-data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
+dataset_path = "data/dataset.txt"
+token_cache_path = "data/dataset_tokens.pt"
+cache_meta_path = "data/dataset_tokens.meta.pt"
+
+dataset_stat = os.stat(dataset_path)
+tokenizer_stat = os.stat(tokenizer.model_file)
+expected_cache_meta = {
+    "dataset_size": dataset_stat.st_size,
+    "dataset_mtime": dataset_stat.st_mtime,
+    "tokenizer_size": tokenizer_stat.st_size,
+    "tokenizer_mtime": tokenizer_stat.st_mtime,
+    "vocab_size": tokenizer.vocab_size,
+}
+
+use_cache = False
+if os.path.exists(token_cache_path) and os.path.exists(cache_meta_path):
+    cached_meta = torch.load(cache_meta_path, map_location="cpu")
+    use_cache = cached_meta == expected_cache_meta
+
+if use_cache:
+    print(f"Loading tokenized dataset cache from {token_cache_path} ...")
+    data = torch.load(token_cache_path, map_location="cpu")
+else:
+    with open(dataset_path, "r", encoding="utf-8") as f:
+        text = f.read()
+    print(f"Dataset loaded: {len(text):,} characters")
+    print("Tokenizing dataset (first run, this can take a while)...")
+    data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
+    torch.save(data, token_cache_path)
+    torch.save(expected_cache_meta, cache_meta_path)
+    print(f"Saved tokenized cache to {token_cache_path}")
+
 print(f"Total tokens: {len(data):,}")
 
 # split
