@@ -1,4 +1,5 @@
 torch
 numpy
 sentencepiece
-kagglehub
+datasets
+huggingface_hub

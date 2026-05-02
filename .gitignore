@@ -48,10 +48,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-#dataset import
+#dataset - ignore old OpenWebText script
 prepare_openwebtext.py
 
-#dataset
+# Generated data files (download with prepare_alpaca.py)
 data/
 
 checkpoints/
