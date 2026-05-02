@@ -31,7 +31,7 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 
 batch_size = 32          # safe for T4
 block_size = 256         # better context than 128
-max_iters = 1000         # TEST FIRST → later change to 50000
+max_iters = 10000
 eval_interval = 200
 learning_rate = 3e-4
 
