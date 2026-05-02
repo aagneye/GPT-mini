@@ -1,9 +1,15 @@
+"""
+Interactive chat assistant using trained GPT model.
+Usage: python generate.py [--mode chat|single]
+"""
+
 import torch
 import torch.nn.functional as F
 from model.gpt import GPT
 from config import *
 from tokenizer.tokenizer import SPTokenizer
 import hashlib
+import sys
 
 checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
 vocab_size = checkpoint["vocab_size"]
@@ -33,8 +39,8 @@ if expected_tokenizer_hash is not None:
 
 
 def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
+    """Generate text autoregressively from context."""
     banned_ids = [tokenizer.unk_id]
-    # Avoid generating sentence boundary tokens as plain text output.
     if tokenizer.sp.bos_id() >= 0:
         banned_ids.append(tokenizer.sp.bos_id())
     if tokenizer.sp.pad_id() >= 0:
@@ -60,27 +66,163 @@ def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
     return idx
 
 
-model = GPT(vocab_size).to(device)
-model.load_state_dict(checkpoint["model_state_dict"])
-model.eval()
-print("Model loaded")
+def format_instruction_prompt(instruction, input_text=""):
+    """Format user instruction into Alpaca-style prompt."""
+    if input_text.strip():
+        return (
+            f"Below is an instruction that describes a task, paired with an input that provides further context. "
+            f"Write a response that appropriately completes the request.\n\n"
+            f"### Instruction:\n{instruction}\n\n### Input:\n{input_text}\n\n### Response:\n"
+        )
+    else:
+        return (
+            f"Below is an instruction that describes a task. "
+            f"Write a response that appropriately completes the request.\n\n"
+            f"### Instruction:\n{instruction}\n\n### Response:\n"
+        )
 
-prompt = "Hello"
-context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
-out = generate(model, context, max_new_tokens=generate_tokens)
 
-print("\nGenerated text:\n")
-# Debug: Check for invalid token IDs
-tokens = out[0].tolist()
-unk_count = sum(1 for t in tokens if t == tokenizer.unk_id)
-invalid_tokens = [t for t in tokens if t >= vocab_size or t < 0]
+def chat_mode(model):
+    """Interactive chat loop."""
+    print("\n" + "="*60)
+    print("🤖 GPT Chat Assistant (Alpaca + Dolly-15K trained)")
+    print("="*60)
+    print("Type your instruction/question and press Enter.")
+    print("Commands:")
+    print("  /help    - Show help")
+    print("  /temp N  - Set temperature (0.1-2.0, default 0.8)")
+    print("  /tokens N- Set max tokens (default from config)")
+    print("  /quit    - Exit")
+    print("="*60 + "\n")
 
-print(f"Vocab size: {vocab_size}")
-print(f"Unknown token ID: {tokenizer.unk_id}")
-print(f"Unknown tokens in output: {unk_count}/{len(tokens)} ({100*unk_count/len(tokens):.1f}%)")
-if invalid_tokens:
-    print(f"WARNING: Found {len(invalid_tokens)} invalid token IDs: {invalid_tokens[:10]}")
-print(f"Max token ID generated: {max(tokens)}")
-print(f"\nFirst 20 token IDs: {tokens[:20]}")
-print()
-print(tokenizer.decode(tokens))
+    temperature = 0.8
+    max_tokens = generate_tokens
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            
+            if not user_input:
+                continue
+            
+            # Commands
+            if user_input.startswith("/"):
+                cmd = user_input.lower().split()
+                
+                if cmd[0] == "/quit":
+                    print("Goodbye!")
+                    break
+                
+                elif cmd[0] == "/help":
+                    print("\nChat with the model by typing instructions like:")
+                    print("  - Write a poem about AI")
+                    print("  - Explain quantum computing in simple terms")
+                    print("  - What are 5 ways to reduce stress?")
+                    print()
+                    continue
+                
+                elif cmd[0] == "/temp" and len(cmd) > 1:
+                    try:
+                        temperature = float(cmd[1])
+                        temperature = max(0.1, min(2.0, temperature))
+                        print(f"Temperature set to {temperature}")
+                    except ValueError:
+                        print("Invalid temperature. Use: /temp 0.8")
+                    continue
+                
+                elif cmd[0] == "/tokens" and len(cmd) > 1:
+                    try:
+                        max_tokens = int(cmd[1])
+                        max_tokens = max(10, min(1000, max_tokens))
+                        print(f"Max tokens set to {max_tokens}")
+                    except ValueError:
+                        print("Invalid token count. Use: /tokens 300")
+                    continue
+                
+                else:
+                    print(f"Unknown command: {cmd[0]}")
+                    continue
+
+            # Generate response
+            prompt = format_instruction_prompt(user_input)
+            context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
+            
+            print("\nAssistant: ", end="", flush=True)
+            
+            with torch.no_grad():
+                output = generate(model, context, max_new_tokens=max_tokens, temperature=temperature)
+            
+            # Decode and extract response after "### Response:\n"
+            full_text = tokenizer.decode(output[0].tolist())
+            
+            # Extract only the generated response (after the prompt)
+            if "### Response:\n" in full_text:
+                response = full_text.split("### Response:\n", 1)[1].strip()
+            else:
+                response = full_text[len(prompt):].strip()
+            
+            print(response)
+            print()
+
+        except KeyboardInterrupt:
+            print("\n\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"\nError: {e}")
+            continue
+
+
+def single_mode(model, prompt="Hello"):
+    """Single-shot generation with debug info."""
+    print(f"\n{'='*60}")
+    print("Single-shot generation mode")
+    print(f"{'='*60}")
+    print(f"Prompt: {prompt}\n")
+    
+    formatted_prompt = format_instruction_prompt(prompt)
+    context = torch.tensor([tokenizer.encode(formatted_prompt)], dtype=torch.long).to(device)
+    
+    with torch.no_grad():
+        out = generate(model, context, max_new_tokens=generate_tokens)
+
+    tokens = out[0].tolist()
+    unk_count = sum(1 for t in tokens if t == tokenizer.unk_id)
+    invalid_tokens = [t for t in tokens if t >= vocab_size or t < 0]
+
+    print(f"Vocab size: {vocab_size}")
+    print(f"Unknown token ID: {tokenizer.unk_id}")
+    print(f"Unknown tokens: {unk_count}/{len(tokens)} ({100*unk_count/len(tokens):.1f}%)")
+    if invalid_tokens:
+        print(f"WARNING: Invalid token IDs: {invalid_tokens[:10]}")
+    print(f"Max token ID: {max(tokens)}")
+    print(f"First 20 tokens: {tokens[:20]}\n")
+    
+    full_text = tokenizer.decode(tokens)
+    print("Generated text:\n")
+    print(full_text)
+    print(f"\n{'='*60}")
+
+
+def main():
+    model = GPT(vocab_size).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+    print(f"✅ Model loaded (vocab={vocab_size}, device={device})")
+
+    # Parse args
+    mode = "chat"
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ["--mode", "-m"] and len(sys.argv) > 2:
+            mode = sys.argv[2]
+        elif sys.argv[1] in ["single", "chat"]:
+            mode = sys.argv[1]
+
+    if mode == "chat":
+        chat_mode(model)
+    else:
+        prompt = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Write a short poem about artificial intelligence"
+        single_mode(model, prompt)
+
+
+if __name__ == "__main__":
+    main()
