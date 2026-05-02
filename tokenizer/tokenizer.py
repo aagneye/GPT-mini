@@ -43,3 +43,20 @@ class SPTokenizer:
 
     def decode(self, tokens):
         return self.sp.decode([int(t) for t in tokens])
+
+
+def main():
+    """CLI: train or load SPM using paths from config (repo root)."""
+    from config import data_path, spm_model_path
+
+    print("Tokenizer setup")
+    print(f"  Dataset: {data_path}")
+    print(f"  SPM path: {spm_model_path}")
+    tok = SPTokenizer(model_file=spm_model_path, data_path=data_path)
+    print(f"  vocab_size: {tok.vocab_size}")
+    print(f"  model_file: {tok.model_file}")
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

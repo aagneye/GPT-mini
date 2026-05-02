@@ -94,7 +94,7 @@ def main():
     print(f"{'='*60}")
     
     print("\n📋 Next steps:")
-    print("  1. Train tokenizer: python -m tokenizer.tokenizer")
+    print("  1. Train tokenizer: python -m tokenizer")
     print("  2. Train model: python train.py")
     print("  3. Generate text: python generate.py")
 
