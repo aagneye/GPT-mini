@@ -74,7 +74,6 @@ def get_batch(split):
 model = GPT(tokenizer.vocab_size).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 checkpoint_dir = "checkpoints"
-checkpoint_every = 500
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 
@@ -162,7 +161,7 @@ for step_idx in range(start_step, max_iters):
     if step_idx % 100 == 0:
         print(f"step {step_idx}, loss {loss.item():.4f}")
 
-    if (step_idx + 1) % checkpoint_every == 0:
+    if (step_idx + 1) % save_interval == 0:
         checkpoint_path = os.path.join(checkpoint_dir, f"step_{step_idx + 1}.pth")
         save_checkpoint(checkpoint_path, step_idx)
         print(f"Saved checkpoint: {checkpoint_path}")

@@ -67,7 +67,7 @@ print("Model loaded")
 
 prompt = "Hello"
 context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
-out = generate(model, context, max_new_tokens=200)
+out = generate(model, context, max_new_tokens=generate_tokens)
 
 print("\nGenerated text:\n")
 # Debug: Check for invalid token IDs

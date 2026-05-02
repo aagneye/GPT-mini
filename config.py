@@ -1,6 +1,7 @@
 # config.py
 
 import os
+import torch
 
 # Kaggle kernels set KAGGLE_KERNEL_RUN_TYPE; use input datasets and /kaggle/working for cache.
 # Override any path with GPT_DATA_PATH, GPT_SPM_MODEL, or GPT_CACHE_DIR if needed.
@@ -24,14 +25,30 @@ _cache_dir = os.environ.get(
 token_cache_path = os.path.join(_cache_dir, "dataset_tokens.pt")
 cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 
-batch_size = 32
-block_size = 128
-max_iters = 50000  # Increased for larger OpenWebText dataset
+# ------------------------
+# Training Settings
+# ------------------------
+
+batch_size = 32          # safe for T4
+block_size = 256         # better context than 128
+max_iters = 1000         # TEST FIRST → later change to 50000
 eval_interval = 200
 learning_rate = 3e-4
-device = "cuda" if __import__('torch').cuda.is_available() else "cpu" 
 
-n_embd = 256
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ------------------------
+# Model Architecture
+# ------------------------
+
+n_embd = 384             # stronger than 256
 n_head = 8
-n_layer = 6
-dropout = 0.2
+n_layer = 8
+dropout = 0.1            # better for larger dataset
+
+# ------------------------
+# Extra Settings
+# ------------------------
+
+save_interval = 1000     # save checkpoints
+generate_tokens = 300
