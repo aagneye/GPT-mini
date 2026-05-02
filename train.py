@@ -5,13 +5,11 @@ from config import *
 import os
 import glob
 import hashlib
+import time
 
-tokenizer = SPTokenizer()
-dataset_path = "data/dataset.txt"
-token_cache_path = "data/dataset_tokens.pt"
-cache_meta_path = "data/dataset_tokens.meta.pt"
+tokenizer = SPTokenizer(model_file=spm_model_path, data_path=data_path)
 
-dataset_stat = os.stat(dataset_path)
+dataset_stat = os.stat(data_path)
 tokenizer_stat = os.stat(tokenizer.model_file)
 expected_cache_meta = {
     "dataset_size": dataset_stat.st_size,
@@ -30,11 +28,29 @@ if use_cache:
     print(f"Loading tokenized dataset cache from {token_cache_path} ...")
     data = torch.load(token_cache_path, map_location="cpu")
 else:
-    with open(dataset_path, "r", encoding="utf-8") as f:
+    with open(data_path, "r", encoding="utf-8") as f:
         text = f.read()
     print(f"Dataset loaded: {len(text):,} characters")
     print("Tokenizing dataset (first run, this can take a while)...")
-    data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
+    chunk_size = 2_000_000  # chars per chunk
+    total_chars = len(text)
+    all_token_ids = []
+    start_time = time.time()
+
+    for chunk_idx, start in enumerate(range(0, total_chars, chunk_size), start=1):
+        end = min(start + chunk_size, total_chars)
+        chunk_text = text[start:end]
+        chunk_token_ids = tokenizer.encode(chunk_text)
+        all_token_ids.extend(chunk_token_ids)
+
+        elapsed = time.time() - start_time
+        progress = (end / total_chars) * 100 if total_chars else 100.0
+        print(
+            f"[tokenize] chunk={chunk_idx} chars={end:,}/{total_chars:,} "
+            f"({progress:.1f}%) tokens={len(all_token_ids):,} elapsed={elapsed:.1f}s"
+        )
+
+    data = torch.tensor(all_token_ids, dtype=torch.long)
     torch.save(data, token_cache_path)
     torch.save(expected_cache_meta, cache_meta_path)
     print(f"Saved tokenized cache to {token_cache_path}")

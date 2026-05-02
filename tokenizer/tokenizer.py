@@ -4,16 +4,25 @@ import sentencepiece as spm
 import os
 
 class SPTokenizer:
-    def __init__(self, data_path="data/dataset.txt", model_prefix="tokenizer/spm", vocab_size=16000):
-        
-        self.model_file = model_prefix + ".model"
+    def __init__(
+        self,
+        model_file=None,
+        data_path="data/dataset.txt",
+        model_prefix="tokenizer/spm",
+        vocab_size=16000,
+    ):
+        if model_file is not None:
+            self.model_file = model_file
+            train_prefix = os.path.splitext(self.model_file)[0]
+        else:
+            train_prefix = model_prefix
+            self.model_file = model_prefix + ".model"
 
-        # train tokenizer if not exists
         if not os.path.exists(self.model_file):
             print("Training SentencePiece tokenizer...")
             spm.SentencePieceTrainer.train(
                 input=data_path,
-                model_prefix=model_prefix,
+                model_prefix=train_prefix,
                 vocab_size=vocab_size,
                 character_coverage=0.9995,    # better for English
                 model_type="bpe",             # IMPORTANT
@@ -23,7 +32,6 @@ class SPTokenizer:
                 eos_id=3,
             )
 
-        # load tokenizer
         self.sp = spm.SentencePieceProcessor()
         self.sp.load(self.model_file)
 

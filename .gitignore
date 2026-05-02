@@ -53,3 +53,8 @@ prepare_openwebtext.py
 
 #dataset
 data/
+
+checkpoints/
+model.pth
+spm.model
+spm.vocab

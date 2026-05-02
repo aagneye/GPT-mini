@@ -7,7 +7,7 @@ import hashlib
 
 checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
 vocab_size = checkpoint["vocab_size"]
-tokenizer = SPTokenizer()
+tokenizer = SPTokenizer(model_file=spm_model_path, data_path=data_path)
 
 
 def file_sha256(path):
