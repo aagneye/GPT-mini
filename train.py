@@ -1,4 +1,6 @@
 import torch
+from torch.cuda.amp import GradScaler, autocast
+
 from model.gpt import GPT
 from tokenizer.tokenizer import SPTokenizer
 from config import *
@@ -73,6 +75,10 @@ def get_batch(split):
 
 model = GPT(tokenizer.vocab_size).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+use_amp = device == "cuda"
+scaler = GradScaler(enabled=use_amp)
+n_params = sum(p.numel() for p in model.parameters())
+print(f"Model parameters: {n_params:,}  |  AMP (fp16): {use_amp}")
 checkpoint_dir = "checkpoints"
 os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -152,11 +158,13 @@ print()
 for step_idx in range(start_step, max_iters):
     xb, yb = get_batch("train")
 
-    logits, loss = model(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    with autocast(enabled=use_amp):
+        logits, loss = model(xb, yb)
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
 
     if step_idx % 100 == 0:
         print(f"step {step_idx}, loss {loss.item():.4f}")

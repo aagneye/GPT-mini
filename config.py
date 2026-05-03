@@ -20,7 +20,8 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 # Training Settings
 # ------------------------
 
-batch_size = 32          # reduce if OOM (larger block_size uses more VRAM)
+# T4 ~15GB: batch 32 × block 512 × ~48M params OOMs on backward; use 8 (+ AMP in train.py).
+batch_size = 8           # try 12 if stable; drop to 4 if still OOM
 block_size = 512
 max_iters = 10000
 eval_interval = 200
