@@ -66,26 +66,22 @@ def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
     return idx
 
 
-def format_instruction_prompt(instruction, input_text=""):
-    """Format user instruction into Alpaca-style prompt."""
-    if input_text.strip():
-        return (
-            f"Below is an instruction that describes a task, paired with an input that provides further context. "
-            f"Write a response that appropriately completes the request.\n\n"
-            f"### Instruction:\n{instruction}\n\n### Input:\n{input_text}\n\n### Response:\n"
-        )
-    else:
-        return (
-            f"Below is an instruction that describes a task. "
-            f"Write a response that appropriately completes the request.\n\n"
-            f"### Instruction:\n{instruction}\n\n### Response:\n"
-        )
+def format_instruction_prompt(instruction, context=""):
+    """Format user instruction in clean ### format (matches training data)."""
+    prompt = f"### Instruction:\n{instruction}\n\n"
+    
+    if context.strip():
+        prompt += f"### Context:\n{context}\n\n"
+    
+    prompt += "### Response:\n"
+    
+    return prompt
 
 
 def chat_mode(model):
     """Interactive chat loop."""
     print("\n" + "="*60)
-    print("🤖 GPT Chat Assistant (Alpaca + Dolly-15K trained)")
+    print("🤖 GPT Chat Assistant (Dolly-15K + Alpaca trained)")
     print("="*60)
     print("Type your instruction/question and press Enter.")
     print("Commands:")
