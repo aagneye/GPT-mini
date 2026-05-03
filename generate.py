@@ -65,18 +65,31 @@ def normalize_inference_prompt(text: str) -> str:
 
 
 def decode_reply(full_text: str, prompt: str) -> str:
+    """Extract only the first response, stop at next instruction."""
     if "### Response:\n" in full_text:
-        return full_text.split("### Response:\n", 1)[1].strip()
-    return full_text[len(prompt) :].strip()
+        after_response = full_text.split("### Response:\n", 1)[1]
+        # If another instruction started, take only text before it
+        if "### Instruction:" in after_response:
+            after_response = after_response.split("### Instruction:")[0]
+        return after_response.strip()
+    return full_text[len(prompt):].strip()
 
 
-def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=40):
+def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=40, stop_on_next_instruction=True):
+    """
+    Generate tokens autoregressively.
+    
+    Args:
+        stop_on_next_instruction: If True, stop when '### Instruction:' appears in decoded output
+                                  (prevents generating multiple instruction/response pairs).
+    """
     banned_ids = [tokenizer.unk_id]
     if tokenizer.sp.bos_id() >= 0:
         banned_ids.append(tokenizer.sp.bos_id())
     if tokenizer.sp.pad_id() >= 0:
         banned_ids.append(tokenizer.sp.pad_id())
 
+    generated_count = 0
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -block_size:]
         logits, _ = model(idx_cond)
@@ -92,6 +105,22 @@ def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=4
 
         idx_next = torch.multinomial(probs, num_samples=1)
         idx = torch.cat((idx, idx_next), dim=1)
+        generated_count += 1
+
+        # Early stopping: check if we generated "### Instruction:" after the initial prompt
+        if stop_on_next_instruction and generated_count > 5:  # Wait a few tokens before checking
+            decoded = tokenizer.decode(idx[0].tolist())
+            # Count occurrences of "### Instruction:"
+            instruction_count = decoded.count("### Instruction:")
+            if instruction_count > 1:  # More than the original prompt
+                # Truncate back to just before the second instruction
+                parts = decoded.split("### Instruction:")
+                # Keep original instruction + first response, discard rest
+                truncated = "### Instruction:".join(parts[:2])
+                # Re-encode to get proper token count
+                truncated_tokens = tokenizer.encode(truncated)
+                idx = torch.tensor([truncated_tokens], dtype=torch.long, device=idx.device)
+                break
 
     return idx
 
