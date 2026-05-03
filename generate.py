@@ -1,19 +1,33 @@
 """
-Interactive chat assistant using trained GPT model.
-Usage: python generate.py [--mode chat|single]
+GPT-mini inference: chat loop or single-shot generation.
+
+Notebook-friendly (no fragile multiline shell strings):
+  python generate.py -i "Explain constellations in simple words"
+  python generate.py --prompt-file prompt.txt
+  python generate.py --stdin < prompt.txt
+
+Legacy:
+  python generate.py single words joined as instruction
 """
 
-import torch
-import torch.nn.functional as F
-from model.gpt import GPT
-from config import *
-from tokenizer.tokenizer import SPTokenizer
+from __future__ import annotations
+
+import argparse
 import hashlib
 import sys
+from pathlib import Path
 
-checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
-vocab_size = checkpoint["vocab_size"]
-tokenizer = SPTokenizer(model_file=spm_model_path, data_path=data_path)
+import torch
+
+from config import (
+    block_size,
+    data_path,
+    device,
+    generate_tokens,
+    spm_model_path,
+)
+from model.gpt import GPT
+from tokenizer.tokenizer import SPTokenizer
 
 
 def file_sha256(path):
@@ -24,22 +38,39 @@ def file_sha256(path):
     return h.hexdigest()
 
 
-if vocab_size != tokenizer.vocab_size:
-    raise ValueError(
-        f"Tokenizer/model vocab mismatch: checkpoint={vocab_size}, tokenizer={tokenizer.vocab_size}"
-    )
-
-expected_tokenizer_hash = checkpoint.get("tokenizer_model_sha256")
-if expected_tokenizer_hash is not None:
-    current_tokenizer_hash = file_sha256(tokenizer.model_file)
-    if expected_tokenizer_hash != current_tokenizer_hash:
-        raise ValueError(
-            "Tokenizer mismatch: checkpoint was trained with a different tokenizer/spm.model file."
-        )
+def format_instruction_prompt(instruction: str, context: str = "") -> str:
+    """Training-aligned prompt (### Instruction / optional ### Context / ### Response)."""
+    prompt = f"### Instruction:\n{instruction.strip()}\n\n"
+    if context.strip():
+        prompt += f"### Context:\n{context.strip()}\n\n"
+    prompt += "### Response:\n"
+    return prompt
 
 
-def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
-    """Generate text autoregressively from context."""
+def normalize_inference_prompt(text: str) -> str:
+    """
+    If text already contains ### Instruction (full template), ensure it ends with
+    ### Response:\\n so the model continues the answer. Otherwise wrap as instruction-only.
+    """
+    text = text.strip()
+    if "### Instruction:" in text:
+        if "### Response:" not in text:
+            text = text.rstrip() + "\n\n### Response:\n"
+        else:
+            tail = text.rstrip()
+            if tail.endswith("### Response:"):
+                text = tail + "\n"
+        return text
+    return format_instruction_prompt(text)
+
+
+def decode_reply(full_text: str, prompt: str) -> str:
+    if "### Response:\n" in full_text:
+        return full_text.split("### Response:\n", 1)[1].strip()
+    return full_text[len(prompt) :].strip()
+
+
+def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=40):
     banned_ids = [tokenizer.unk_id]
     if tokenizer.sp.bos_id() >= 0:
         banned_ids.append(tokenizer.sp.bos_id())
@@ -55,7 +86,6 @@ def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
             logits[:, token_id] = float("-inf")
         probs = torch.softmax(logits, dim=-1)
 
-        # top-k filtering
         values, indices = torch.topk(probs, top_k)
         probs = torch.zeros_like(probs).scatter_(1, indices, values)
         probs = probs / probs.sum(dim=-1, keepdim=True)
@@ -66,30 +96,41 @@ def generate(model, idx, max_new_tokens, temperature=0.8, top_k=40):
     return idx
 
 
-def format_instruction_prompt(instruction, context=""):
-    """Format user instruction in clean ### format (matches training data)."""
-    prompt = f"### Instruction:\n{instruction}\n\n"
-    
-    if context.strip():
-        prompt += f"### Context:\n{context}\n\n"
-    
-    prompt += "### Response:\n"
-    
-    return prompt
+def load_model_and_tokenizer():
+    checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
+    vocab_sz = checkpoint["vocab_size"]
+    tok = SPTokenizer(model_file=spm_model_path, data_path=data_path)
+
+    if vocab_sz != tok.vocab_size:
+        raise ValueError(
+            f"Tokenizer/model vocab mismatch: checkpoint={vocab_sz}, tokenizer={tok.vocab_size}"
+        )
+
+    expected_hash = checkpoint.get("tokenizer_model_sha256")
+    if expected_hash is not None:
+        current_hash = file_sha256(tok.model_file)
+        if expected_hash != current_hash:
+            raise ValueError(
+                "Tokenizer mismatch: checkpoint tokenizer hash does not match current spm.model."
+            )
+
+    mdl = GPT(vocab_sz).to(device)
+    mdl.load_state_dict(checkpoint["model_state_dict"])
+    mdl.eval()
+    return mdl, tok, vocab_sz
 
 
-def chat_mode(model):
+tokenizer = None
+
+
+def chat_mode(model, vocab_size):
     """Interactive chat loop."""
-    print("\n" + "="*60)
-    print("🤖 GPT Chat Assistant (Dolly-15K + Alpaca trained)")
-    print("="*60)
+    print("\n" + "=" * 60)
+    print("GPT Chat Assistant (Dolly-15K + Alpaca trained)")
+    print("=" * 60)
     print("Type your instruction/question and press Enter.")
-    print("Commands:")
-    print("  /help    - Show help")
-    print("  /temp N  - Set temperature (0.1-2.0, default 0.8)")
-    print("  /tokens N- Set max tokens (default from config)")
-    print("  /quit    - Exit")
-    print("="*60 + "\n")
+    print("Commands: /help  /temp N  /tokens N  /quit")
+    print("=" * 60 + "\n")
 
     temperature = 0.8
     max_tokens = generate_tokens
@@ -97,67 +138,39 @@ def chat_mode(model):
     while True:
         try:
             user_input = input("You: ").strip()
-            
             if not user_input:
                 continue
-            
-            # Commands
+
             if user_input.startswith("/"):
                 cmd = user_input.lower().split()
-                
                 if cmd[0] == "/quit":
                     print("Goodbye!")
                     break
-                
-                elif cmd[0] == "/help":
-                    print("\nChat with the model by typing instructions like:")
-                    print("  - Write a poem about AI")
-                    print("  - Explain quantum computing in simple terms")
-                    print("  - What are 5 ways to reduce stress?")
-                    print()
+                if cmd[0] == "/help":
+                    print("\nExamples: Write a poem about AI | Explain quantum physics simply\n")
                     continue
-                
-                elif cmd[0] == "/temp" and len(cmd) > 1:
-                    try:
-                        temperature = float(cmd[1])
-                        temperature = max(0.1, min(2.0, temperature))
-                        print(f"Temperature set to {temperature}")
-                    except ValueError:
-                        print("Invalid temperature. Use: /temp 0.8")
+                if cmd[0] == "/temp" and len(cmd) > 1:
+                    temperature = max(0.1, min(2.0, float(cmd[1])))
+                    print(f"Temperature set to {temperature}")
                     continue
-                
-                elif cmd[0] == "/tokens" and len(cmd) > 1:
-                    try:
-                        max_tokens = int(cmd[1])
-                        max_tokens = max(10, min(1000, max_tokens))
-                        print(f"Max tokens set to {max_tokens}")
-                    except ValueError:
-                        print("Invalid token count. Use: /tokens 300")
+                if cmd[0] == "/tokens" and len(cmd) > 1:
+                    max_tokens = max(10, min(1000, int(cmd[1])))
+                    print(f"Max tokens set to {max_tokens}")
                     continue
-                
-                else:
-                    print(f"Unknown command: {cmd[0]}")
-                    continue
+                print(f"Unknown command: {cmd[0]}")
+                continue
 
-            # Generate response
             prompt = format_instruction_prompt(user_input)
-            context = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
-            
+            context_ids = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long).to(device)
+
             print("\nAssistant: ", end="", flush=True)
-            
             with torch.no_grad():
-                output = generate(model, context, max_new_tokens=max_tokens, temperature=temperature)
-            
-            # Decode and extract response after "### Response:\n"
+                output = generate_tokens_autoreg(
+                    model, context_ids, max_new_tokens=max_tokens, temperature=temperature
+                )
+
             full_text = tokenizer.decode(output[0].tolist())
-            
-            # Extract only the generated response (after the prompt)
-            if "### Response:\n" in full_text:
-                response = full_text.split("### Response:\n", 1)[1].strip()
-            else:
-                response = full_text[len(prompt):].strip()
-            
-            print(response)
+            print(decode_reply(full_text, prompt))
             print()
 
         except KeyboardInterrupt:
@@ -168,56 +181,154 @@ def chat_mode(model):
             continue
 
 
-def single_mode(model, prompt="Hello"):
-    """Single-shot generation with debug info."""
-    print(f"\n{'='*60}")
-    print("Single-shot generation mode")
-    print(f"{'='*60}")
-    print(f"Prompt: {prompt}\n")
-    
-    formatted_prompt = format_instruction_prompt(prompt)
-    context = torch.tensor([tokenizer.encode(formatted_prompt)], dtype=torch.long).to(device)
-    
+def run_single_inference(
+    model,
+    vocab_size,
+    prompt_text: str,
+    *,
+    temperature: float,
+    max_new_tokens: int,
+    reply_only: bool,
+    quiet: bool,
+):
+    prompt_text = normalize_inference_prompt(prompt_text)
+    context_ids = torch.tensor([tokenizer.encode(prompt_text)], dtype=torch.long).to(device)
+
     with torch.no_grad():
-        out = generate(model, context, max_new_tokens=generate_tokens)
+        out = generate_tokens_autoreg(
+            model,
+            context_ids,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+        )
 
     tokens = out[0].tolist()
-    unk_count = sum(1 for t in tokens if t == tokenizer.unk_id)
-    invalid_tokens = [t for t in tokens if t >= vocab_size or t < 0]
-
-    print(f"Vocab size: {vocab_size}")
-    print(f"Unknown token ID: {tokenizer.unk_id}")
-    print(f"Unknown tokens: {unk_count}/{len(tokens)} ({100*unk_count/len(tokens):.1f}%)")
-    if invalid_tokens:
-        print(f"WARNING: Invalid token IDs: {invalid_tokens[:10]}")
-    print(f"Max token ID: {max(tokens)}")
-    print(f"First 20 tokens: {tokens[:20]}\n")
-    
     full_text = tokenizer.decode(tokens)
-    print("Generated text:\n")
-    print(full_text)
-    print(f"\n{'='*60}")
+    reply = decode_reply(full_text, prompt_text)
+
+    if reply_only:
+        print(reply)
+        return
+
+    if not quiet:
+        unk_count = sum(1 for t in tokens if t == tokenizer.unk_id)
+        invalid_tokens = [t for t in tokens if t >= vocab_size or t < 0]
+        print(f"\n{'=' * 60}")
+        print("Single-shot inference")
+        print(f"{'=' * 60}")
+        print(f"Prompt (normalized):\n{prompt_text}\n")
+        print(f"Vocab size: {vocab_size}")
+        print(f"Unknown tokens: {unk_count}/{len(tokens)} ({100 * unk_count / len(tokens):.1f}%)")
+        if invalid_tokens:
+            print(f"WARNING: Invalid token IDs: {invalid_tokens[:10]}")
+        print(f"Max token ID: {max(tokens)}")
+        print(f"First 20 tokens: {tokens[:20]}\n")
+
+    print("Assistant reply:\n")
+    print(reply)
+    if not quiet:
+        print(f"\n{'=' * 60}")
 
 
-def main():
-    model = GPT(vocab_size).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
-    print(f"✅ Model loaded (vocab={vocab_size}, device={device})")
+def parse_args(argv):
+    p = argparse.ArgumentParser(
+        description="GPT-mini inference (chat or single-shot).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python generate.py
+  python generate.py -i "Explain constellations in simple words"
+  python generate.py --prompt-file prompt.txt --reply-only
+  python generate.py single Explain stars in simple words
+""",
+    )
+    p.add_argument(
+        "mode",
+        nargs="?",
+        default="chat",
+        choices=["chat", "single"],
+        help='chat (default) or single (legacy: remaining words = instruction)',
+    )
+    p.add_argument(
+        "-i",
+        "--instruction",
+        help="Instruction text (wrapped as ### Instruction / ### Response). Best for notebooks.",
+    )
+    p.add_argument("-c", "--context", default="", help="Optional ### Context block.")
+    p.add_argument(
+        "-f",
+        "--prompt-file",
+        type=Path,
+        metavar="PATH",
+        help="UTF-8 file with instruction only or full ### template.",
+    )
+    p.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read prompt from stdin (multiline OK).",
+    )
+    p.add_argument(
+        "--reply-only",
+        action="store_true",
+        help="Print only the assistant reply (no debug stats).",
+    )
+    p.add_argument("-q", "--quiet", action="store_true", help="Less debug output for single-shot.")
+    p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument("--max-new-tokens", type=int, default=None, metavar="N")
+    p.add_argument(
+        "legacy_words",
+        nargs="*",
+        help="After 'single': words joined as instruction (avoid multiline).",
+    )
+    return p.parse_args(argv)
 
-    # Parse args
-    mode = "chat"
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ["--mode", "-m"] and len(sys.argv) > 2:
-            mode = sys.argv[2]
-        elif sys.argv[1] in ["single", "chat"]:
-            mode = sys.argv[1]
 
-    if mode == "chat":
-        chat_mode(model)
-    else:
-        prompt = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Write a short poem about artificial intelligence"
-        single_mode(model, prompt)
+def resolve_prompt(args) -> str | None:
+    if args.instruction is not None:
+        return format_instruction_prompt(args.instruction, args.context)
+    if args.prompt_file is not None:
+        path = args.prompt_file
+        if not path.is_file():
+            raise FileNotFoundError(f"Prompt file not found: {path}")
+        return path.read_text(encoding="utf-8")
+    if args.stdin:
+        return sys.stdin.read()
+    if args.mode == "single" and args.legacy_words:
+        return format_instruction_prompt(" ".join(args.legacy_words))
+    if args.mode == "single":
+        return format_instruction_prompt(
+            "Write a short poem about artificial intelligence."
+        )
+    return None
+
+
+def main(argv=None):
+    global tokenizer
+
+    argv = argv if argv is not None else sys.argv[1:]
+    args = parse_args(argv)
+
+    max_nt = args.max_new_tokens if args.max_new_tokens is not None else generate_tokens
+
+    model, tok, vocab_size = load_model_and_tokenizer()
+    tokenizer = tok
+    print(f"Model loaded (vocab={vocab_size}, device={device})")
+
+    prompt = resolve_prompt(args)
+
+    if prompt is None:
+        chat_mode(model, vocab_size)
+        return
+
+    run_single_inference(
+        model,
+        vocab_size,
+        prompt,
+        temperature=args.temperature,
+        max_new_tokens=max_nt,
+        reply_only=args.reply_only,
+        quiet=args.quiet or args.reply_only,
+    )
 
 
 if __name__ == "__main__":
