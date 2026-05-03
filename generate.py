@@ -75,7 +75,15 @@ def decode_reply(full_text: str, prompt: str) -> str:
     return full_text[len(prompt):].strip()
 
 
-def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=40, stop_on_next_instruction=True):
+def generate_tokens_autoreg(
+    model,
+    idx,
+    max_new_tokens,
+    temperature=0.8,
+    top_k=40,
+    stop_on_next_instruction=True,
+    greedy=False,
+):
     """
     Generate tokens autoregressively.
     
@@ -94,16 +102,19 @@ def generate_tokens_autoreg(model, idx, max_new_tokens, temperature=0.8, top_k=4
         idx_cond = idx[:, -block_size:]
         logits, _ = model(idx_cond)
 
-        logits = logits[:, -1, :] / temperature
+        logits_last = logits[:, -1, :].clone()
         for token_id in banned_ids:
-            logits[:, token_id] = float("-inf")
-        probs = torch.softmax(logits, dim=-1)
+            logits_last[:, token_id] = float("-inf")
 
-        values, indices = torch.topk(probs, top_k)
-        probs = torch.zeros_like(probs).scatter_(1, indices, values)
-        probs = probs / probs.sum(dim=-1, keepdim=True)
-
-        idx_next = torch.multinomial(probs, num_samples=1)
+        if greedy:
+            idx_next = logits_last.argmax(dim=-1, keepdim=True)
+        else:
+            logits_last = logits_last / temperature
+            probs = torch.softmax(logits_last, dim=-1)
+            values, indices = torch.topk(probs, top_k)
+            probs = torch.zeros_like(probs).scatter_(1, indices, values)
+            probs = probs / probs.sum(dim=-1, keepdim=True)
+            idx_next = torch.multinomial(probs, num_samples=1)
         idx = torch.cat((idx, idx_next), dim=1)
         generated_count += 1
 
@@ -195,7 +206,11 @@ def chat_mode(model, vocab_size):
             print("\nAssistant: ", end="", flush=True)
             with torch.no_grad():
                 output = generate_tokens_autoreg(
-                    model, context_ids, max_new_tokens=max_tokens, temperature=temperature
+                    model,
+                    context_ids,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    greedy=False,
                 )
 
             full_text = tokenizer.decode(output[0].tolist())
@@ -219,6 +234,7 @@ def run_single_inference(
     max_new_tokens: int,
     reply_only: bool,
     quiet: bool,
+    greedy: bool,
 ):
     prompt_text = normalize_inference_prompt(prompt_text)
     context_ids = torch.tensor([tokenizer.encode(prompt_text)], dtype=torch.long).to(device)
@@ -229,6 +245,7 @@ def run_single_inference(
             context_ids,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
+            greedy=greedy,
         )
 
     tokens = out[0].tolist()
@@ -303,6 +320,11 @@ Examples:
     )
     p.add_argument("-q", "--quiet", action="store_true", help="Less debug output for single-shot.")
     p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument(
+        "--greedy",
+        action="store_true",
+        help="Deterministic argmax decoding (often steadier on small / under-trained models).",
+    )
     p.add_argument("--max-new-tokens", type=int, default=None, metavar="N")
     p.add_argument(
         "legacy_words",
@@ -357,6 +379,7 @@ def main(argv=None):
         max_new_tokens=max_nt,
         reply_only=args.reply_only,
         quiet=args.quiet or args.reply_only,
+        greedy=args.greedy,
     )
 
 

@@ -20,8 +20,8 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 # Training Settings
 # ------------------------
 
-batch_size = 32          # safe for T4
-block_size = 256         # better context than 128
+batch_size = 32          # reduce if OOM (larger block_size uses more VRAM)
+block_size = 512
 max_iters = 10000
 eval_interval = 200
 learning_rate = 3e-4
@@ -32,9 +32,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Model Architecture
 # ------------------------
 
-n_embd = 384             # stronger than 256
+n_embd = 512
 n_head = 8
-n_layer = 8
+n_layer = 10
 dropout = 0.1            # better for larger dataset
 
 # ------------------------
