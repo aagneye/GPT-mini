@@ -23,7 +23,7 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 # T4 ~15GB: batch 32 × block 512 × ~48M params OOMs on backward; use 8 (+ AMP in train.py).
 batch_size = 8           # try 12 if stable; drop to 4 if still OOM
 block_size = 512
-max_iters = 10000
+max_iters = 20000
 eval_interval = 200
 learning_rate = 3e-4
 
@@ -35,7 +35,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 n_embd = 512
 n_head = 8
-n_layer = 10
+n_layer = 12
 dropout = 0.1            # better for larger dataset
 
 # ------------------------
