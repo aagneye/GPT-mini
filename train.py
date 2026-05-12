@@ -168,6 +168,26 @@ for step_idx in range(start_step, max_iters):
 
     if step_idx % 100 == 0:
         print(f"step {step_idx}, loss {loss.item():.4f}")
+    
+    if step_idx % eval_interval == 0 and step_idx > 0:
+        model.eval()
+        with torch.no_grad():
+            val_losses = []
+            for _ in range(10):
+                xb_val, yb_val = get_batch("val")
+                with autocast(enabled=use_amp):
+                    _, val_loss = model(xb_val, yb_val)
+                val_losses.append(val_loss.item())
+            avg_val_loss = sum(val_losses) / len(val_losses)
+            print(f"[EVAL] step {step_idx} | train loss: {loss.item():.4f} | val loss: {avg_val_loss:.4f}")
+            
+            # Generate sample text
+            context = torch.tensor([tokenizer.sp.bos_id()], dtype=torch.long, device=device).unsqueeze(0)
+            generated_ids = model.generate(context, max_new_tokens=100, temperature=0.8, top_k=40)
+            sample_text = tokenizer.decode(generated_ids[0].tolist())
+            print(f"[SAMPLE] {sample_text[:200]}")
+            print()
+        model.train()
 
     if (step_idx + 1) % save_interval == 0:
         checkpoint_path = os.path.join(checkpoint_dir, f"step_{step_idx + 1}.pth")
