@@ -9,7 +9,7 @@ class SPTokenizer:
         model_file=None,
         data_path="data/dataset.txt",
         model_prefix="tokenizer/spm",
-        vocab_size=16000,
+        vocab_size=32000,
     ):
         if model_file is not None:
             self.model_file = model_file
