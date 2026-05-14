@@ -1,10 +1,9 @@
-# config.py
+# config.py - SMALLER MODEL (trains faster, better for limited compute)
 
 import os
 import torch
 
 # Kaggle auto-detection: uses /kaggle/working for writable cache
-# Override paths with GPT_DATA_PATH, GPT_SPM_MODEL, or GPT_CACHE_DIR if needed
 _on_kaggle = os.environ.get("KAGGLE_KERNEL_RUN_TYPE") is not None
 
 data_path = os.environ.get("GPT_DATA_PATH", "data/dataset.txt")
@@ -17,30 +16,29 @@ token_cache_path = os.path.join(_cache_dir, "dataset_tokens.pt")
 cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 
 # ------------------------
-# Training Settings
+# Training Settings (OPTIMIZED FOR GTX 1650)
 # ------------------------
 
-# T4 ~15GB: batch 32 × block 512 × ~48M params OOMs on backward; use 8 (+ AMP in train.py).
-batch_size = 8           # try 12 if stable; drop to 4 if still OOM
-block_size = 512
-max_iters = 80000        # Larger model needs more training
+batch_size = 32          # Good for smaller model
+block_size = 256         # Balance between context and speed
+max_iters = 50000        # Enough for good convergence
 eval_interval = 200
 learning_rate = 3e-4
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ------------------------
-# Model Architecture
+# Model Architecture (SMALLER - ~25M params)
 # ------------------------
 
-n_embd = 512
-n_head = 8
-n_layer = 12
-dropout = 0.1            # better for larger dataset
+n_embd = 384             # Sweet spot
+n_head = 6               # Divides evenly into 384
+n_layer = 8              # Moderate depth
+dropout = 0.1
 
 # ------------------------
 # Extra Settings
 # ------------------------
 
-save_interval = 1000     # save checkpoints
+save_interval = 1000
 generate_tokens = 300
