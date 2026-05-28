@@ -66,14 +66,28 @@ print(f"Total tokens: {len(data):,}")
 n = int(0.9 * len(data))
 train_data = data[:n]
 val_data = data[n:]
+data_on_device = device == "cuda" and dataset_on_device
+
+if data_on_device:
+    print("Moving tokenized dataset to GPU memory for faster batch sampling...")
+    train_data = train_data.to(device, non_blocking=True)
+    val_data = val_data.to(device, non_blocking=True)
+
+batch_index_device = device if data_on_device else "cpu"
+batch_offsets = torch.arange(block_size + 1, device=batch_index_device).unsqueeze(0)
 
 
 def get_batch(split):
     data = train_data if split == "train" else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i + block_size] for i in ix])
-    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
-    return x.to(device), y.to(device)
+    ix = torch.randint(len(data) - block_size, (batch_size,), device=batch_index_device)
+    batch = data[ix.unsqueeze(1) + batch_offsets]
+    x = batch[:, :-1].contiguous()
+    y = batch[:, 1:].contiguous()
+    if data_on_device:
+        return x, y
+    if device == "cuda":
+        return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+    return x, y
 
 
 model = GPT(tokenizer.vocab_size).to(device)
@@ -200,6 +214,8 @@ print(f"Micro-batch size: {batch_size:,}")
 print(f"Gradient accumulation steps: {gradient_accumulation_steps:,}")
 print(f"Tokens per optimizer step: {batch_size * block_size * gradient_accumulation_steps:,}")
 print(f"Total tokens to process: {max_iters * batch_size * block_size * gradient_accumulation_steps:,}")
+print(f"Activation checkpointing: {activation_checkpointing}")
+print(f"Dataset on device: {data_on_device}")
 print("Estimated training time: benchmarking after first few steps")
 print()
 
@@ -214,8 +230,6 @@ for step_idx in range(start_step, max_iters):
             loss = loss / gradient_accumulation_steps
         scaler.scale(loss).backward()
 
-    if device == "cuda":
-        torch.cuda.empty_cache()
     scaler.step(optimizer)
     scaler.update()
 

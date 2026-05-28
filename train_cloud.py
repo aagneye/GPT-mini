@@ -121,12 +121,29 @@ def print_heartbeat():
     elapsed = time.time() - training_state["start_time"]
     progress = (step_idx / max_iters) * 100
     cost = (elapsed / 3600) * 1.99
+    avg_step_time = (
+        sum(training_state["step_durations"]) / len(training_state["step_durations"])
+        if training_state["step_durations"]
+        else None
+    )
+    tokens_per_second = (
+        tokens_per_optimizer_step / avg_step_time if avg_step_time else None
+    )
     
     print("\n" + "="*60)
     print(f"💓 HEARTBEAT - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"   Step: {step_idx:,}/{max_iters:,} ({progress:.2f}%)")
     print(f"   Runtime: {elapsed/3600:.2f} hours | Cost: ${cost:.2f}")
-    print(f"   GPU Memory: {torch.cuda.memory_allocated()/1e9:.2f}GB / {torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB")
+    if torch.cuda.is_available():
+        print(
+            f"   GPU Memory: {torch.cuda.memory_allocated()/1e9:.2f}GB / "
+            f"{torch.cuda.get_device_properties(0).total_memory/1e9:.2f}GB"
+        )
+    if avg_step_time is not None:
+        print(
+            f"   Avg step: {avg_step_time:.2f}s | "
+            f"Throughput: {tokens_per_second:,.0f} tokens/s"
+        )
     print("="*60 + "\n")
     
     training_state["last_heartbeat"] = time.time()
@@ -197,13 +214,27 @@ print(f"Total tokens: {len(data):,}")
 n = int(0.9 * len(data))
 train_data = data[:n]
 val_data = data[n:]
+data_on_device = device == "cuda" and dataset_on_device
+
+if data_on_device:
+    print("Moving tokenized dataset to GPU memory for faster batch sampling...")
+    train_data = train_data.to(device, non_blocking=True)
+    val_data = val_data.to(device, non_blocking=True)
+
+batch_index_device = device if data_on_device else "cpu"
+batch_offsets = torch.arange(block_size + 1, device=batch_index_device).unsqueeze(0)
 
 def get_batch(split):
     data = train_data if split == "train" else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i + block_size] for i in ix])
-    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
-    return x.to(device), y.to(device)
+    ix = torch.randint(len(data) - block_size, (batch_size,), device=batch_index_device)
+    batch = data[ix.unsqueeze(1) + batch_offsets]
+    x = batch[:, :-1].contiguous()
+    y = batch[:, 1:].contiguous()
+    if data_on_device:
+        return x, y
+    if device == "cuda":
+        return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+    return x, y
 
 # =====================
 # Model Setup
@@ -330,6 +361,8 @@ print(f"  Micro-batch size: {batch_size:,}")
 print(f"  Gradient accumulation steps: {gradient_accumulation_steps:,}")
 print(f"  Tokens per optimizer step: {tokens_per_optimizer_step:,}")
 print(f"  Total tokens to process: {max_iters * tokens_per_optimizer_step:,}")
+print(f"  Activation checkpointing: {activation_checkpointing}")
+print(f"  Dataset on device: {data_on_device}")
 print("  Estimated training time: benchmarking after first few steps")
 print("  Estimated cost: benchmarking after first few steps")
 print()
@@ -351,8 +384,6 @@ for step_idx in range(start_step, max_iters):
             loss = loss / gradient_accumulation_steps
         scaler.scale(loss).backward()
 
-    if device == "cuda":
-        torch.cuda.empty_cache()
     scaler.step(optimizer)
     scaler.update()
     step_duration = time.time() - step_start_time

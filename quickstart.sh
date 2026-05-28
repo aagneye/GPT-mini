@@ -30,7 +30,7 @@ tmux new-session -d -s training
 # Prepare training
 echo "[4/5] Starting training in tmux..."
 tmux send-keys -t training "cd ~/gpt-mini-training" C-m
-tmux send-keys -t training "python train_cloud.py" C-m
+tmux send-keys -t training "GPT_BATCH_SIZE=512 GPT_BLOCK_SIZE=512 GPT_GRAD_ACCUM_STEPS=1 GPT_MAX_ITERS=20000 GPT_ACTIVATION_CHECKPOINTING=0 python train_cloud.py" C-m
 
 echo "[5/5] Setup complete!"
 echo "=========================================="
