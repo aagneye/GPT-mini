@@ -21,11 +21,12 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 
 # Auto-detect environment and optimize settings
 if _on_amd_cloud:
-    # AMD MI300X: 1.5TB VRAM - Be aggressive!
-    batch_size = 64
+    # The larger 1024/16/16 model with 1024 context OOMs at batch_size=64.
+    # Use a small micro-batch and recover throughput with gradient accumulation.
+    batch_size = 4
     block_size = 1024
     save_interval = 1000
-    print("🚀 Detected AMD Cloud GPU - Using optimized settings!")
+    print("Detected AMD Cloud GPU - Using optimized settings!")
 elif _on_kaggle:
     # Kaggle T4: 15GB VRAM
     batch_size = 8
@@ -40,6 +41,7 @@ else:
 max_iters = 60000
 eval_interval = 200
 learning_rate = 3e-4
+gradient_accumulation_steps = 16 if _on_amd_cloud else 1
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -50,12 +52,11 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 n_embd = 1024
 n_head = 16
 n_layer = 16
-dropout = 0.1            # better for larger dataset
+dropout = 0.1
 
 # ------------------------
 # Extra Settings
 # ------------------------
 
-# save_interval set above based on environment
-keep_last_checkpoints = 3 if _on_amd_cloud else 2  # keep more on cloud
+keep_last_checkpoints = 3 if _on_amd_cloud else 2
 generate_tokens = 300

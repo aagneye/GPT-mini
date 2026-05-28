@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Cloud-optimized training script with automatic checkpoint saving and progress tracking
-Designed for AMD GPU Droplets with proper cleanup and syncing
-"""
-
-import torch
-from torch.cuda.amp import GradScaler, autocast
 import os
 import glob
 import hashlib
@@ -15,9 +7,20 @@ import signal
 import json
 from datetime import datetime
 
+if "PYTORCH_HIP_ALLOC_CONF" not in os.environ:
+    os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
+
+import torch
+from torch.cuda.amp import GradScaler, autocast
+
 from model.gpt import GPT
 from tokenizer.tokenizer import SPTokenizer
 from config import *
+
+"""
+Cloud-optimized training script with automatic checkpoint saving and progress tracking
+Designed for AMD GPU Droplets with proper cleanup and syncing
+"""
 
 # =====================
 # Cloud-specific config
@@ -27,6 +30,7 @@ SYNC_DIR = "/mnt/persistent"  # Change this to your persistent storage mount
 PROGRESS_FILE = "training_progress.json"
 SYNC_INTERVAL = 10  # Sync every N checkpoints
 HEARTBEAT_INTERVAL = 300  # Log status every 5 minutes
+tokens_per_optimizer_step = batch_size * block_size * gradient_accumulation_steps
 
 # Track training state
 training_state = {
@@ -72,7 +76,7 @@ def save_progress_report():
         "progress_percentage": (step_idx / max_iters) * 100,
         "elapsed_hours": elapsed / 3600,
         "estimated_total_hours": (elapsed / (step_idx - start_step + 1)) * max_iters / 3600 if step_idx > start_step else 0,
-        "tokens_processed": (step_idx - start_step) * batch_size * block_size,
+        "tokens_processed": (step_idx - start_step) * tokens_per_optimizer_step,
         "last_update": datetime.now().isoformat(),
         "cost_estimate_usd": (elapsed / 3600) * 1.99,  # $1.99/hr for single GPU
     }
@@ -310,8 +314,10 @@ if not resumed:
 print(f"\nTraining Configuration:")
 print(f"  Total iterations: {max_iters:,}")
 print(f"  Dataset tokens: {len(data):,}")
-print(f"  Tokens per batch: {batch_size * block_size:,}")
-print(f"  Total tokens to process: {max_iters * batch_size * block_size:,}")
+print(f"  Micro-batch size: {batch_size:,}")
+print(f"  Gradient accumulation steps: {gradient_accumulation_steps:,}")
+print(f"  Tokens per optimizer step: {tokens_per_optimizer_step:,}")
+print(f"  Total tokens to process: {max_iters * tokens_per_optimizer_step:,}")
 print(f"  Estimated training time: {(max_iters * 0.5 / 3600):.1f} hours")  # rough estimate
 print(f"  Estimated cost: ${(max_iters * 0.5 / 3600 * 1.99):.2f}")
 print()
@@ -323,18 +329,20 @@ print()
 step_idx = start_step
 
 for step_idx in range(start_step, max_iters):
-    xb, yb = get_batch("train")
-
     optimizer.zero_grad(set_to_none=True)
-    with autocast(enabled=use_amp):
-        logits, loss = model(xb, yb)
+    loss = None
+    for micro_step in range(gradient_accumulation_steps):
+        xb, yb = get_batch("train")
+        with autocast(enabled=use_amp):
+            logits, loss = model(xb, yb)
+            loss = loss / gradient_accumulation_steps
+        scaler.scale(loss).backward()
 
-    scaler.scale(loss).backward()
     scaler.step(optimizer)
     scaler.update()
 
     if step_idx % 100 == 0:
-        print(f"step {step_idx:,}, loss {loss.item():.4f}")
+        print(f"step {step_idx:,}, loss {(loss.item() * gradient_accumulation_steps):.4f}")
     
     if step_idx % eval_interval == 0 and step_idx > 0:
         model.eval()
@@ -346,7 +354,8 @@ for step_idx in range(start_step, max_iters):
                     _, val_loss = model(xb_val, yb_val)
                 val_losses.append(val_loss.item())
             avg_val_loss = sum(val_losses) / len(val_losses)
-            print(f"[EVAL] step {step_idx:,} | train loss: {loss.item():.4f} | val loss: {avg_val_loss:.4f}")
+            train_loss = loss.item() * gradient_accumulation_steps if loss is not None else float("nan")
+            print(f"[EVAL] step {step_idx:,} | train loss: {train_loss:.4f} | val loss: {avg_val_loss:.4f}")
             
             # Generate sample text
             context = torch.tensor([tokenizer.sp.bos_id()], dtype=torch.long, device=device).unsqueeze(0)
