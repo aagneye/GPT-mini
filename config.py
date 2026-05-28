@@ -33,7 +33,7 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 if _on_amd_cloud:
     # Conservative default for ROCm VMs that report large VRAM but OOM on larger
     # micro-batches. Override with env vars after confirming headroom.
-    batch_size = _env_int("GPT_BATCH_SIZE", 2)
+    batch_size = _env_int("GPT_BATCH_SIZE", 1)
     block_size = _env_int("GPT_BLOCK_SIZE", 1024)
     save_interval = _env_int("GPT_SAVE_INTERVAL", 1000)
     print("Detected AMD Cloud GPU - Using optimized settings!")
@@ -51,8 +51,12 @@ eval_interval = _env_int("GPT_EVAL_INTERVAL", 200)
 learning_rate = _env_float("GPT_LEARNING_RATE", 3e-4)
 gradient_accumulation_steps = _env_int(
     "GPT_GRAD_ACCUM_STEPS",
-    32 if _on_amd_cloud else 1,
+    64 if _on_amd_cloud else 1,
 )
+optimizer_foreach = os.environ.get(
+    "GPT_OPTIMIZER_FOREACH",
+    "0" if _on_amd_cloud else "1",
+) == "1"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 

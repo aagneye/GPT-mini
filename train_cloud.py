@@ -38,6 +38,7 @@ training_state = {
     "last_heartbeat": time.time(),
     "total_steps": 0,
     "total_tokens_processed": 0,
+    "step_durations": [],
 }
 
 # Handle graceful shutdown
@@ -68,13 +69,21 @@ signal.signal(signal.SIGTERM, signal_handler)
 def save_progress_report():
     """Save detailed training progress to JSON"""
     elapsed = time.time() - training_state["start_time"]
+    avg_step_time = (
+        sum(training_state["step_durations"]) / len(training_state["step_durations"])
+        if training_state["step_durations"]
+        else None
+    )
+    estimated_total_hours = (
+        (avg_step_time * max_iters) / 3600 if avg_step_time is not None else None
+    )
     progress = {
         "last_step": step_idx,
         "total_steps_completed": step_idx - start_step,
         "max_iters": max_iters,
         "progress_percentage": (step_idx / max_iters) * 100,
         "elapsed_hours": elapsed / 3600,
-        "estimated_total_hours": (elapsed / (step_idx - start_step + 1)) * max_iters / 3600 if step_idx > start_step else 0,
+        "estimated_total_hours": estimated_total_hours,
         "tokens_processed": (step_idx - start_step) * tokens_per_optimizer_step,
         "last_update": datetime.now().isoformat(),
         "cost_estimate_usd": (elapsed / 3600) * 1.99,  # $1.99/hr for single GPU
@@ -201,7 +210,11 @@ def get_batch(split):
 # =====================
 
 model = GPT(tokenizer.vocab_size).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=learning_rate,
+    foreach=optimizer_foreach,
+)
 use_amp = device == "cuda"
 scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 n_params = sum(p.numel() for p in model.parameters())
@@ -317,8 +330,8 @@ print(f"  Micro-batch size: {batch_size:,}")
 print(f"  Gradient accumulation steps: {gradient_accumulation_steps:,}")
 print(f"  Tokens per optimizer step: {tokens_per_optimizer_step:,}")
 print(f"  Total tokens to process: {max_iters * tokens_per_optimizer_step:,}")
-print(f"  Estimated training time: {(max_iters * 0.5 / 3600):.1f} hours")  # rough estimate
-print(f"  Estimated cost: ${(max_iters * 0.5 / 3600 * 1.99):.2f}")
+print("  Estimated training time: benchmarking after first few steps")
+print("  Estimated cost: benchmarking after first few steps")
 print()
 
 # =====================
@@ -328,6 +341,7 @@ print()
 step_idx = start_step
 
 for step_idx in range(start_step, max_iters):
+    step_start_time = time.time()
     optimizer.zero_grad(set_to_none=True)
     loss = None
     for micro_step in range(gradient_accumulation_steps):
@@ -337,8 +351,14 @@ for step_idx in range(start_step, max_iters):
             loss = loss / gradient_accumulation_steps
         scaler.scale(loss).backward()
 
+    if device == "cuda":
+        torch.cuda.empty_cache()
     scaler.step(optimizer)
     scaler.update()
+    step_duration = time.time() - step_start_time
+    training_state["step_durations"].append(step_duration)
+    if len(training_state["step_durations"]) > 50:
+        training_state["step_durations"].pop(0)
 
     if step_idx % 100 == 0:
         print(f"step {step_idx:,}, loss {(loss.item() * gradient_accumulation_steps):.4f}")
@@ -377,9 +397,15 @@ for step_idx in range(start_step, max_iters):
         
         # Save progress report
         progress = save_progress_report()
+        eta_hours = (
+            progress["estimated_total_hours"] - progress["elapsed_hours"]
+            if progress["estimated_total_hours"] is not None
+            else None
+        )
+        eta_text = f"{eta_hours:.1f}h" if eta_hours is not None else "warming up"
         print(f"📊 Progress: {progress['progress_percentage']:.1f}% | "
               f"Cost: ${progress['cost_estimate_usd']:.2f} | "
-              f"ETA: {progress['estimated_total_hours'] - progress['elapsed_hours']:.1f}h")
+              f"ETA: {eta_text}")
         
         # Sync to persistent storage periodically
         if (step_idx + 1) % (save_interval * SYNC_INTERVAL) == 0:

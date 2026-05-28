@@ -77,7 +77,11 @@ def get_batch(split):
 
 
 model = GPT(tokenizer.vocab_size).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=learning_rate,
+    foreach=optimizer_foreach,
+)
 use_amp = device == "cuda"
 scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 n_params = sum(p.numel() for p in model.parameters())
@@ -196,9 +200,11 @@ print(f"Micro-batch size: {batch_size:,}")
 print(f"Gradient accumulation steps: {gradient_accumulation_steps:,}")
 print(f"Tokens per optimizer step: {batch_size * block_size * gradient_accumulation_steps:,}")
 print(f"Total tokens to process: {max_iters * batch_size * block_size * gradient_accumulation_steps:,}")
+print("Estimated training time: benchmarking after first few steps")
 print()
 
 for step_idx in range(start_step, max_iters):
+    step_start_time = time.time()
     optimizer.zero_grad(set_to_none=True)
     loss = None
     for micro_step in range(gradient_accumulation_steps):
@@ -208,6 +214,8 @@ for step_idx in range(start_step, max_iters):
             loss = loss / gradient_accumulation_steps
         scaler.scale(loss).backward()
 
+    if device == "cuda":
+        torch.cuda.empty_cache()
     scaler.step(optimizer)
     scaler.update()
 

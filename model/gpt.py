@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -93,7 +95,12 @@ class GPT(nn.Module):
         x = tok_emb + pos_emb
         for block in self.blocks:
             if self.training and activation_checkpointing:
-                x = checkpoint(block, x, use_reentrant=False)
+                x = checkpoint(
+                    block,
+                    x,
+                    use_reentrant=False,
+                    context_fn=lambda: (nullcontext(), nullcontext()),
+                )
             else:
                 x = block(x)
         x = self.ln_f(x)
