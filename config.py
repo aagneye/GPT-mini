@@ -49,9 +49,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Model Architecture
 # ------------------------
 
-n_embd = 1024
-n_head = 16
-n_layer = 16
+n_embd = 1280
+n_head = 20
+n_layer = 20
 dropout = 0.1
 activation_checkpointing = _on_amd_cloud
 
