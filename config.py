@@ -34,7 +34,7 @@ if _on_amd_cloud:
     # Conservative default for ROCm VMs that report large VRAM but OOM on larger
     # micro-batches. Override with env vars after confirming headroom.
     batch_size = _env_int("GPT_BATCH_SIZE", 1)
-    block_size = _env_int("GPT_BLOCK_SIZE", 1024)
+    block_size = _env_int("GPT_BLOCK_SIZE", 512)
     save_interval = _env_int("GPT_SAVE_INTERVAL", 1000)
     print("Detected AMD Cloud GPU - Using optimized settings!")
 elif _on_kaggle:
@@ -64,9 +64,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Model Architecture
 # ------------------------
 
-n_embd = _env_int("GPT_N_EMBD", 1280)
-n_head = _env_int("GPT_N_HEAD", 20)
-n_layer = _env_int("GPT_N_LAYER", 20)
+if _on_amd_cloud:
+    # Default to a ~250M-class model while staying closer to the working
+    # memory envelope on the AMD VM.
+    _default_n_embd = 1088
+    _default_n_head = 17
+    _default_n_layer = 15
+else:
+    _default_n_embd = 1088
+    _default_n_head = 17
+    _default_n_layer = 15
+
+n_embd = _env_int("GPT_N_EMBD", _default_n_embd)
+n_head = _env_int("GPT_N_HEAD", _default_n_head)
+n_layer = _env_int("GPT_N_LAYER", _default_n_layer)
 dropout = _env_float("GPT_DROPOUT", 0.1)
 activation_checkpointing = os.environ.get(
     "GPT_ACTIVATION_CHECKPOINTING",
