@@ -40,7 +40,7 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 if _on_amd_cloud:
     # Favor throughput on large-memory cloud GPUs while keeping the total token
     # budget sane enough to stay within a typical single-GPU spend cap.
-    batch_size = _env_int("GPT_BATCH_SIZE", 512)
+    batch_size = _env_int("GPT_BATCH_SIZE", 128)
     block_size = _env_int("GPT_BLOCK_SIZE", 512)
     save_interval = _env_int("GPT_SAVE_INTERVAL", 1000)
     print("Detected AMD Cloud GPU - Using optimized settings!")
@@ -75,9 +75,9 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 if _on_amd_cloud:
     # Default to a ~250M-class model while staying closer to the working
     # memory envelope on the AMD VM.
-    _default_n_embd = 1088
-    _default_n_head = 17
-    _default_n_layer = 15
+    _default_n_embd = 768
+    _default_n_head = 12
+    _default_n_layer = 12
 else:
     _default_n_embd = 1088
     _default_n_head = 17
@@ -89,7 +89,7 @@ n_layer = _env_int("GPT_N_LAYER", _default_n_layer)
 dropout = _env_float("GPT_DROPOUT", 0.1)
 activation_checkpointing = os.environ.get(
     "GPT_ACTIVATION_CHECKPOINTING",
-    "0",
+    "1",
 ) == "1"
 
 # ------------------------
