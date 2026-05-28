@@ -1,8 +1,11 @@
-# config.py
+# Updated config for cloud training with larger batch size
+# Optimized for AMD MI300X with 1.5TB VRAM
+
 import os
 import torch
 
-# Environment detection
+# Kaggle auto-detection: uses /kaggle/working for writable cache
+# Override paths with GPT_DATA_PATH, GPT_SPM_MODEL, or GPT_CACHE_DIR if needed
 _on_kaggle = os.environ.get("KAGGLE_KERNEL_RUN_TYPE") is not None
 _on_amd_cloud = os.path.exists("/opt/rocm")  # Detect AMD GPU Droplet
 
@@ -19,25 +22,17 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 # Training Settings
 # ------------------------
 
-# Auto-detect environment and optimize settings
+# OPTIMIZED FOR AMD MI300X (1.5TB VRAM!)
+# We can be VERY aggressive with batch size
 if _on_amd_cloud:
-    # AMD MI300X: 1.5TB VRAM - Be aggressive!
-    batch_size = 64
-    block_size = 1024
-    save_interval = 1000
+    batch_size = 64           # 8x larger than T4!
+    block_size = 1024         # 2x larger context
     print("🚀 Detected AMD Cloud GPU - Using optimized settings!")
-elif _on_kaggle:
-    # Kaggle T4: 15GB VRAM
-    batch_size = 8
-    block_size = 1024
-    save_interval = 5000
 else:
-    # Local development
     batch_size = 8
-    block_size = 1024
-    save_interval = 5000
+    block_size = 512
 
-max_iters = 60000
+max_iters = 80000
 eval_interval = 200
 learning_rate = 3e-4
 
@@ -47,15 +42,15 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Model Architecture
 # ------------------------
 
-n_embd = 1024
-n_head = 16
-n_layer = 16
-dropout = 0.1            # better for larger dataset
+n_embd = 512
+n_head = 8
+n_layer = 12
+dropout = 0.1
 
 # ------------------------
 # Extra Settings
 # ------------------------
 
-# save_interval set above based on environment
-keep_last_checkpoints = 3 if _on_amd_cloud else 2  # keep more on cloud
+save_interval = 1000         # Save more frequently on cloud (every 1000 steps)
+keep_last_checkpoints = 3    # Keep last 3 checkpoints
 generate_tokens = 300

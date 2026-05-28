@@ -58,3 +58,6 @@ checkpoints/
 model.pth
 spm.model
 spm.vocab
+
+# Markdown files
+*.md

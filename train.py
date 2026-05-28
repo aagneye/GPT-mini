@@ -92,20 +92,58 @@ def file_sha256(path):
 
 
 def save_checkpoint(path, step):
-    torch.save(
-        {
-            "step": step,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "vocab_size": tokenizer.vocab_size,
-            "tokenizer_model_sha256": file_sha256(tokenizer.model_file),
-        },
-        path,
-    )
+    payload = {
+        "step": step,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "vocab_size": tokenizer.vocab_size,
+        "tokenizer_model_sha256": file_sha256(tokenizer.model_file),
+    }
+    tmp_path = f"{path}.tmp"
+    torch.save(payload, tmp_path)
+    os.replace(tmp_path, path)
+
+
+def checkpoint_step_from_path(path):
+    name = os.path.basename(path)
+    if name.startswith("step_") and name.endswith(".pth"):
+        try:
+            return int(name[5:-4])
+        except ValueError:
+            return -1
+    return -1
+
+
+def prune_old_checkpoints(keep_last=None):
+    keep_last = keep_last if keep_last is not None else keep_last_checkpoints
+    files = glob.glob(os.path.join(checkpoint_dir, "step_*.pth"))
+    files.sort(key=checkpoint_step_from_path)
+    for old_path in files[:-keep_last]:
+        try:
+            os.remove(old_path)
+            print(f"Removed old checkpoint: {old_path}")
+        except OSError as e:
+            print(f"Could not remove {old_path}: {e}")
+
+
+def find_latest_checkpoint():
+    files = glob.glob(os.path.join(checkpoint_dir, "step_*.pth"))
+    files = [f for f in files if not f.endswith(".tmp")]
+    files.sort(key=checkpoint_step_from_path, reverse=True)
+    for path in files:
+        try:
+            torch.load(path, map_location="cpu")
+            return path
+        except (RuntimeError, OSError) as e:
+            print(f"Skipping corrupt checkpoint {path}: {e}")
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return None
 
 
 start_step = 0
-checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "step_*.pth"))
 resumed = False
 
 
@@ -129,8 +167,8 @@ def try_resume(path, include_optimizer=True):
     start_step = checkpoint.get("step", -1) + 1
 
 
-if checkpoint_files:
-    latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+latest_checkpoint = find_latest_checkpoint()
+if latest_checkpoint:
     try:
         try_resume(latest_checkpoint, include_optimizer=True)
         resumed = True
@@ -192,6 +230,7 @@ for step_idx in range(start_step, max_iters):
     if (step_idx + 1) % save_interval == 0:
         checkpoint_path = os.path.join(checkpoint_dir, f"step_{step_idx + 1}.pth")
         save_checkpoint(checkpoint_path, step_idx)
+        prune_old_checkpoints()
         print(f"Saved checkpoint: {checkpoint_path}")
 
 save_checkpoint("model.pth", max_iters - 1)
