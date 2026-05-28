@@ -4,7 +4,18 @@ import torch
 
 # Environment detection
 _on_kaggle = os.environ.get("KAGGLE_KERNEL_RUN_TYPE") is not None
-_on_amd_cloud = os.path.exists("/opt/rocm")  # Detect AMD GPU Droplet
+_on_amd_cloud = os.path.exists("/opt/rocm")
+
+
+def _env_int(name, default):
+    value = os.environ.get(name)
+    return int(value) if value is not None else default
+
+
+def _env_float(name, default):
+    value = os.environ.get(name)
+    return float(value) if value is not None else default
+
 
 data_path = os.environ.get("GPT_DATA_PATH", "data/dataset.txt")
 spm_model_path = os.environ.get("GPT_SPM_MODEL", "tokenizer/spm.model")
@@ -19,29 +30,29 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 # Training Settings
 # ------------------------
 
-# Auto-detect environment and optimize settings
 if _on_amd_cloud:
-    # Use a larger micro-batch to improve GPU utilization while keeping
-    # the same effective tokens per optimizer step via less accumulation.
-    batch_size = 8
-    block_size = 1024
-    save_interval = 1000
+    # Conservative default for ROCm VMs that report large VRAM but OOM on larger
+    # micro-batches. Override with env vars after confirming headroom.
+    batch_size = _env_int("GPT_BATCH_SIZE", 2)
+    block_size = _env_int("GPT_BLOCK_SIZE", 1024)
+    save_interval = _env_int("GPT_SAVE_INTERVAL", 1000)
     print("Detected AMD Cloud GPU - Using optimized settings!")
 elif _on_kaggle:
-    # Kaggle T4: 15GB VRAM
-    batch_size = 8
-    block_size = 1024
-    save_interval = 5000
+    batch_size = _env_int("GPT_BATCH_SIZE", 8)
+    block_size = _env_int("GPT_BLOCK_SIZE", 1024)
+    save_interval = _env_int("GPT_SAVE_INTERVAL", 5000)
 else:
-    # Local development
-    batch_size = 8
-    block_size = 1024
-    save_interval = 5000
+    batch_size = _env_int("GPT_BATCH_SIZE", 8)
+    block_size = _env_int("GPT_BLOCK_SIZE", 1024)
+    save_interval = _env_int("GPT_SAVE_INTERVAL", 5000)
 
-max_iters = 60000
-eval_interval = 200
-learning_rate = 3e-4
-gradient_accumulation_steps = 8 if _on_amd_cloud else 1
+max_iters = _env_int("GPT_MAX_ITERS", 60000)
+eval_interval = _env_int("GPT_EVAL_INTERVAL", 200)
+learning_rate = _env_float("GPT_LEARNING_RATE", 3e-4)
+gradient_accumulation_steps = _env_int(
+    "GPT_GRAD_ACCUM_STEPS",
+    32 if _on_amd_cloud else 1,
+)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -49,15 +60,21 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Model Architecture
 # ------------------------
 
-n_embd = 1280
-n_head = 20
-n_layer = 20
-dropout = 0.1
-activation_checkpointing = _on_amd_cloud
+n_embd = _env_int("GPT_N_EMBD", 1280)
+n_head = _env_int("GPT_N_HEAD", 20)
+n_layer = _env_int("GPT_N_LAYER", 20)
+dropout = _env_float("GPT_DROPOUT", 0.1)
+activation_checkpointing = os.environ.get(
+    "GPT_ACTIVATION_CHECKPOINTING",
+    "1" if _on_amd_cloud else "0",
+) == "1"
 
 # ------------------------
 # Extra Settings
 # ------------------------
 
-keep_last_checkpoints = 3 if _on_amd_cloud else 2
-generate_tokens = 300
+keep_last_checkpoints = _env_int(
+    "GPT_KEEP_LAST_CHECKPOINTS",
+    3 if _on_amd_cloud else 2,
+)
+generate_tokens = _env_int("GPT_GENERATE_TOKENS", 300)
