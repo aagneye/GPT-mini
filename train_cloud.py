@@ -11,7 +11,6 @@ if "PYTORCH_HIP_ALLOC_CONF" not in os.environ:
     os.environ["PYTORCH_HIP_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
-from torch.cuda.amp import GradScaler, autocast
 
 from model.gpt import GPT
 from tokenizer.tokenizer import SPTokenizer
@@ -150,12 +149,12 @@ expected_cache_meta = {
 
 use_cache = False
 if os.path.exists(token_cache_path) and os.path.exists(cache_meta_path):
-    cached_meta = torch.load(cache_meta_path, map_location="cpu")
+    cached_meta = torch.load(cache_meta_path, map_location="cpu", weights_only=True)
     use_cache = cached_meta == expected_cache_meta
 
 if use_cache:
     print(f"Loading tokenized dataset cache from {token_cache_path} ...")
-    data = torch.load(token_cache_path, map_location="cpu")
+    data = torch.load(token_cache_path, map_location="cpu", weights_only=True)
 else:
     with open(data_path, "r", encoding="utf-8") as f:
         text = f.read()
@@ -204,7 +203,7 @@ def get_batch(split):
 model = GPT(tokenizer.vocab_size).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 use_amp = device == "cuda"
-scaler = GradScaler(enabled=use_amp)
+scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 n_params = sum(p.numel() for p in model.parameters())
 print(f"Model parameters: {n_params:,}  |  AMP (fp16): {use_amp}")
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -333,7 +332,7 @@ for step_idx in range(start_step, max_iters):
     loss = None
     for micro_step in range(gradient_accumulation_steps):
         xb, yb = get_batch("train")
-        with autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             logits, loss = model(xb, yb)
             loss = loss / gradient_accumulation_steps
         scaler.scale(loss).backward()
@@ -350,7 +349,7 @@ for step_idx in range(start_step, max_iters):
             val_losses = []
             for _ in range(10):
                 xb_val, yb_val = get_batch("val")
-                with autocast(enabled=use_amp):
+                with torch.amp.autocast("cuda", enabled=use_amp):
                     _, val_loss = model(xb_val, yb_val)
                 val_losses.append(val_loss.item())
             avg_val_loss = sum(val_losses) / len(val_losses)

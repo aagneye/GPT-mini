@@ -21,9 +21,9 @@ cache_meta_path = os.path.join(_cache_dir, "dataset_tokens.meta.pt")
 
 # Auto-detect environment and optimize settings
 if _on_amd_cloud:
-    # The larger 1024/16/16 model with 1024 context OOMs at batch_size=64.
-    # Use a small micro-batch and recover throughput with gradient accumulation.
-    batch_size = 4
+    # This VM appears to expose far less usable VRAM than the headline card size.
+    # Keep the 1024-context model, but train with a tiny micro-batch.
+    batch_size = 1
     block_size = 1024
     save_interval = 1000
     print("Detected AMD Cloud GPU - Using optimized settings!")
@@ -41,7 +41,7 @@ else:
 max_iters = 60000
 eval_interval = 200
 learning_rate = 3e-4
-gradient_accumulation_steps = 16 if _on_amd_cloud else 1
+gradient_accumulation_steps = 64 if _on_amd_cloud else 1
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -53,6 +53,7 @@ n_embd = 1024
 n_head = 16
 n_layer = 16
 dropout = 0.1
+activation_checkpointing = _on_amd_cloud
 
 # ------------------------
 # Extra Settings
