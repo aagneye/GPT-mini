@@ -218,14 +218,10 @@ data_on_device = device == "cuda" and dataset_on_device
 
 if data_on_device:
     print("Moving tokenized dataset to GPU memory for faster batch sampling...")
-    # Use only 80% of GPU memory for dataset to leave room for model
-    max_dataset_tokens = int(0.8 * torch.cuda.get_device_properties(0).total_memory / 4)  # fp32
-    if len(train_data) > max_dataset_tokens:
-        print(f"Dataset too large for GPU, trimming from {len(train_data):,} to {max_dataset_tokens:,} tokens")
-        train_data = train_data[:max_dataset_tokens]
-        val_data = val_data[:max_dataset_tokens // 10]
     train_data = train_data.to(device, non_blocking=True)
     val_data = val_data.to(device, non_blocking=True)
+else:
+    print("Dataset kept on CPU to avoid GPU memory pressure")
 
 batch_index_device = device if data_on_device else "cpu"
 batch_offsets = torch.arange(block_size + 1, device=batch_index_device).unsqueeze(0)
