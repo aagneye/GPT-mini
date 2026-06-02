@@ -136,8 +136,8 @@ def generate_tokens_autoreg(
     return idx
 
 
-def load_model_and_tokenizer():
-    checkpoint = torch.load("model.pth", map_location=device, weights_only=True)
+def load_model_and_tokenizer(checkpoint_path="model.pth"):
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     vocab_sz = checkpoint["vocab_size"]
     tok = SPTokenizer(model_file=spm_model_path, data_path=data_path)
 
@@ -286,6 +286,8 @@ Examples:
   python generate.py -i "Explain constellations in simple words"
   python generate.py --prompt-file prompt.txt --reply-only
   python generate.py single Explain stars in simple words
+  python generate.py --checkpoint models/step_20000.pth
+  python generate.py --checkpoint models/step_20000.pth -i "What is AI?"
 """,
     )
     p.add_argument(
@@ -294,6 +296,12 @@ Examples:
         default="chat",
         choices=["chat", "single"],
         help='chat (default) or single (legacy: remaining words = instruction)',
+    )
+    p.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to model checkpoint (default: model.pth)",
     )
     p.add_argument(
         "-i",
@@ -361,9 +369,11 @@ def main(argv=None):
 
     max_nt = args.max_new_tokens if args.max_new_tokens is not None else generate_tokens
 
-    model, tok, vocab_size = load_model_and_tokenizer()
+    # Allow checkpoint selection via --checkpoint flag
+    checkpoint_path = getattr(args, 'checkpoint', None) or "model.pth"
+    model, tok, vocab_size = load_model_and_tokenizer(checkpoint_path)
     tokenizer = tok
-    print(f"Model loaded (vocab={vocab_size}, device={device})")
+    print(f"Model loaded from {checkpoint_path} (vocab={vocab_size}, device={device})")
 
     prompt = resolve_prompt(args)
 
