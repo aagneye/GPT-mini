@@ -32,7 +32,10 @@ def _env_bool(name, default):
 
 
 data_path = os.environ.get("GPT_DATA_PATH", "data/dataset.txt")
-spm_model_path = os.environ.get("GPT_SPM_MODEL", "tokenizer/spm.model")
+spm_model_path = os.environ.get(
+    "GPT_SPM_MODEL",
+    "tokenizer/spm32k.model" if _on_t4_1b else "tokenizer/spm.model",
+)
 _cache_dir = os.environ.get(
     "GPT_CACHE_DIR",
     "/kaggle/working" if _on_kaggle else "data",
