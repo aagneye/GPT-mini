@@ -19,6 +19,7 @@ from pathlib import Path
 
 import torch
 
+import config as runtime_config
 from config import (
     block_size,
     data_path,
@@ -161,8 +162,31 @@ def load_model_and_tokenizer(checkpoint_path="model.pth"):
     gpt_config_dict = checkpoint.get("gpt_config")
     if gpt_config_dict is not None:
         cfg = GPTConfig.from_dict(gpt_config_dict)
+        globals()["block_size"] = cfg.block_size
         mdl = GPT(cfg).to(device)
     else:
+        # Historical checkpoints do not contain architecture metadata. Infer
+        # the original module-level config from their tensor shapes before
+        # importing the legacy implementation.
+        state = checkpoint["model_state_dict"]
+        runtime_config.n_embd = state["token_embedding_table.weight"].shape[1]
+        runtime_config.block_size = state["position_embedding_table.weight"].shape[0]
+        block_prefix = "blocks.0.sa.heads."
+        head_keys = [
+            key for key in state
+            if key.startswith(block_prefix) and key.endswith(".key.weight")
+        ]
+        if not head_keys:
+            raise ValueError("Legacy checkpoint has no attention head weights")
+        runtime_config.n_head = len(head_keys)
+        runtime_config.n_layer = len(
+            {
+                key.split(".")[1]
+                for key in state
+                if key.startswith("blocks.") and key.split(".")[1].isdigit()
+            }
+        )
+        globals()["block_size"] = runtime_config.block_size
         from model.gpt_legacy import GPT as LegacyGPT
 
         mdl = LegacyGPT(vocab_sz).to(device)

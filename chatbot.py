@@ -9,19 +9,12 @@ Usage:
   python chatbot.py --temp 0.7                # Adjust temperature
 """
 
-import os
 import sys
 import argparse
 import torch
 from pathlib import Path
 
-# Set environment variables BEFORE importing config
-# These match the step_20000.pth training configuration
-os.environ["GPT_N_EMBD"] = "768"
-os.environ["GPT_N_HEAD"] = "12"
-os.environ["GPT_N_LAYER"] = "12"
-os.environ["GPT_BLOCK_SIZE"] = "512"
-
+import config as runtime_config
 from config import (
     block_size,
     data_path,
@@ -52,12 +45,31 @@ def load_checkpoint_model(checkpoint_path):
     # New checkpoints carry their own GPTConfig so the model knows its own
     # shape. Legacy checkpoints (e.g. step_20000.pth) predate both the config
     # and the fused architecture, so load them with the legacy GPT; the GPT_N_*
-    # env vars above still pin the legacy 768/12/12 shape for those.
+    # Legacy checkpoints are inspected below to recover their architecture.
     gpt_config_dict = checkpoint.get("gpt_config")
     if gpt_config_dict is not None:
         cfg = GPTConfig.from_dict(gpt_config_dict)
+        globals()["block_size"] = cfg.block_size
         mdl = GPT(cfg).to(device)
     else:
+        state = checkpoint["model_state_dict"]
+        runtime_config.n_embd = state["token_embedding_table.weight"].shape[1]
+        runtime_config.block_size = state["position_embedding_table.weight"].shape[0]
+        head_prefix = "blocks.0.sa.heads."
+        runtime_config.n_head = len(
+            [
+                key for key in state
+                if key.startswith(head_prefix) and key.endswith(".key.weight")
+            ]
+        )
+        runtime_config.n_layer = len(
+            {
+                key.split(".")[1]
+                for key in state
+                if key.startswith("blocks.") and key.split(".")[1].isdigit()
+            }
+        )
+        globals()["block_size"] = runtime_config.block_size
         from model.gpt_legacy import GPT as LegacyGPT
 
         mdl = LegacyGPT(vocab_sz).to(device)
@@ -239,7 +251,18 @@ Examples:
         print(f"[+] Model loaded successfully!")
         print(f"[+] Vocab size: {vocab_size}")
         print(f"[+] Device: {device}")
-        print(f"[+] Architecture: 768d, 12 heads, 12 layers\n")
+        model_config = getattr(model, "config", None)
+        if model_config is not None:
+            architecture = (
+                f"{model_config.n_embd}d, {model_config.n_head} heads, "
+                f"{model_config.n_layer} layers"
+            )
+        else:
+            architecture = (
+                f"{runtime_config.n_embd}d, {runtime_config.n_head} heads, "
+                f"{runtime_config.n_layer} layers"
+            )
+        print(f"[+] Architecture: {architecture}\n")
     except Exception as e:
         print(f"[!] Failed to load model: {e}")
         sys.exit(1)

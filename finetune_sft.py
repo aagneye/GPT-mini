@@ -210,7 +210,12 @@ def main():
                 i += args.batch_size
                 batch = [examples[j] for j in batch_idx]
                 x, y = collate(batch, pad_id, block_size)
-                x, y = x.to(device), y.to(device)
+                # Causal LM logits at position t predict the token at t+1.
+                # Keep the response-only mask aligned with that one-token
+                # shift; otherwise each response token would be visible to
+                # its own prediction and the SFT loss would leak labels.
+                x = x[:, :-1].to(device)
+                y = y[:, 1:].to(device)
                 with torch.autocast("cuda", enabled=use_amp, dtype=torch.float16):
                     logits, _ = model(x, targets=None)
                     loss = F.cross_entropy(
