@@ -26,7 +26,7 @@ from config import (
     generate_tokens,
     spm_model_path,
 )
-from model.gpt import GPT
+from model.gpt import GPT, GPTConfig
 from tokenizer.tokenizer import SPTokenizer
 
 
@@ -154,7 +154,18 @@ def load_model_and_tokenizer(checkpoint_path="model.pth"):
                 "Tokenizer mismatch: checkpoint tokenizer hash does not match current spm.model."
             )
 
-    mdl = GPT(vocab_sz).to(device)
+    # Checkpoints saved by the new trainer carry their own GPTConfig, so the
+    # model knows its own shape (this is what test_model_step_20000.py used to
+    # work around). Legacy checkpoints predate both the config and the fused
+    # architecture, so load them with the legacy GPT built from config globals.
+    gpt_config_dict = checkpoint.get("gpt_config")
+    if gpt_config_dict is not None:
+        cfg = GPTConfig.from_dict(gpt_config_dict)
+        mdl = GPT(cfg).to(device)
+    else:
+        from model.gpt_legacy import GPT as LegacyGPT
+
+        mdl = LegacyGPT(vocab_sz).to(device)
     mdl.load_state_dict(checkpoint["model_state_dict"])
     mdl.eval()
     return mdl, tok, vocab_sz
