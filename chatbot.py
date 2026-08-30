@@ -29,7 +29,7 @@ from config import (
     generate_tokens,
     spm_model_path,
 )
-from model.gpt import GPT
+from model.gpt import GPT, GPTConfig
 from tokenizer.tokenizer import SPTokenizer
 
 
@@ -49,7 +49,18 @@ def load_checkpoint_model(checkpoint_path):
             f"Tokenizer/model vocab mismatch: checkpoint={vocab_sz}, tokenizer={tok.vocab_size}"
         )
 
-    mdl = GPT(vocab_sz).to(device)
+    # New checkpoints carry their own GPTConfig so the model knows its own
+    # shape. Legacy checkpoints (e.g. step_20000.pth) predate both the config
+    # and the fused architecture, so load them with the legacy GPT; the GPT_N_*
+    # env vars above still pin the legacy 768/12/12 shape for those.
+    gpt_config_dict = checkpoint.get("gpt_config")
+    if gpt_config_dict is not None:
+        cfg = GPTConfig.from_dict(gpt_config_dict)
+        mdl = GPT(cfg).to(device)
+    else:
+        from model.gpt_legacy import GPT as LegacyGPT
+
+        mdl = LegacyGPT(vocab_sz).to(device)
     mdl.load_state_dict(checkpoint["model_state_dict"])
     mdl.eval()
     
