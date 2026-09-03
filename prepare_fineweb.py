@@ -69,7 +69,7 @@ class ShardWriter:
         path = os.path.join(self.out_dir, filename)
         self.buffer[:count].tofile(path)
         self.manifest.append({"file": filename, "tokens": int(count), "split": self.split})
-        print(f"  wrote {path} ({count:,} tokens)")
+        print(f"  wrote {path} ({count:,} tokens)", flush=True)
         self.shard_index += 1
 
     def add(self, arr: np.ndarray):
@@ -133,17 +133,29 @@ def main():
     writer = ShardWriter(args.out, args.shard_size, split="train")
 
     import multiprocessing as mp
+    import sys
+
+    # "fork" after HuggingFace/datasets has spun up threads is unstable and can
+    # silently kill the parent mid-stream. spawn is slower to start but safe.
+    ctx = mp.get_context("spawn")
 
     total_tokens = 0
     total_docs = 0
-    with mp.Pool(processes=args.workers, initializer=_init_worker,
-                 initargs=(args.spm_model,)) as pool:
+    with ctx.Pool(
+        processes=args.workers,
+        initializer=_init_worker,
+        initargs=(args.spm_model,),
+    ) as pool:
         for arr in pool.imap(_tokenize_doc, doc_iter(), chunksize=args.chunksize):
             writer.add(arr)
             total_tokens += len(arr)
             total_docs += 1
-            if total_docs % 100_000 == 0:
-                print(f"  docs={total_docs:,} tokens={total_tokens:,}")
+            if total_docs % 10_000 == 0:
+                print(
+                    f"  docs={total_docs:,} tokens={total_tokens:,}",
+                    flush=True,
+                )
+                sys.stdout.flush()
 
     writer.close()
 

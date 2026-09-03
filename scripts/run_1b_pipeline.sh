@@ -17,6 +17,7 @@ export GPT_SPM_MODEL="${SPM_MODEL}"
 export GPT_DATA_DIR="${DATA_DIR}"
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export PYTHONUNBUFFERED=1
 
 mkdir -p "${LOG_DIR}" "${DATA_DIR}" "$(dirname "${SAMPLE_TXT}")" "${ROOT}/checkpoints_fsdp"
 cd "${ROOT}"
@@ -24,6 +25,13 @@ cd "${ROOT}"
 source .venv/bin/activate
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "${LOG_DIR}/pipeline.log"; }
+
+on_err() {
+  local ec=$?
+  log "PIPELINE FAILED at line ${BASH_LINENO[0]} (exit ${ec}). See latest log under ${LOG_DIR}"
+  exit "${ec}"
+}
+trap on_err ERR
 
 log "=== 1B pipeline start | GPUs=$(python -c 'import torch; print(torch.cuda.device_count())') ==="
 
@@ -81,11 +89,21 @@ fi
 
 # ---------- 2) Tokenize FineWeb into uint16 shards ----------
 if [[ ! -f "${DATA_DIR}/index.json" ]]; then
+  # Incomplete prior runs leave .bin files without index.json; restart clean.
+  if compgen -G "${DATA_DIR}/train_*.bin" > /dev/null; then
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    bak="${DATA_DIR}_incomplete_${stamp}"
+    log "Moving incomplete shards aside -> ${bak}"
+    mv "${DATA_DIR}" "${bak}"
+    mkdir -p "${DATA_DIR}"
+    ln -sfn "${DATA_DIR}" "${ROOT}/data/fineweb_edu" || true
+  fi
   log "Tokenizing FineWeb-Edu sample-10BT -> ${DATA_DIR}"
-  python prepare_fineweb.py \
+  # 32 workers + spawn is more stable than 48 fork workers with HF streaming.
+  python -u prepare_fineweb.py \
     --spm-model "${SPM_MODEL}" \
     --out "${DATA_DIR}" \
-    --workers 48 \
+    --workers 32 \
     --shard-size 100000000 \
     2>&1 | tee -a "${LOG_DIR}/prepare_fineweb.log"
   log "Shards ready"
