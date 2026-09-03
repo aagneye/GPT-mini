@@ -56,7 +56,13 @@ with open(out, "w", encoding="utf-8") as f:
         if n % 200_000_000 < 100_000:
             print(f"  sample chars={n:,}", flush=True)
 print(f"Wrote {n:,} chars to {out}", flush=True)
+# Avoid HuggingFace streaming finalizer crash on break.
+import os as _os
+_os._exit(0)
 PY
+    # os._exit above ends the python process with 0; continue the bash pipeline.
+    true
+
   else
     log "Tokenizer sample already exists"
   fi
