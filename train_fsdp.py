@@ -50,8 +50,8 @@ from data_loader import DataLoader
 from model.gpt import GPT, GPTConfig, Block
 from tokenizer.tokenizer import SPTokenizer
 
-CHECKPOINT_DIR = "checkpoints_fsdp"
-PROGRESS_FILE = "training_progress.json"
+CHECKPOINT_DIR = os.environ.get("GPT_CHECKPOINT_DIR", "checkpoints_fsdp")
+PROGRESS_FILE = os.environ.get("GPT_PROGRESS_FILE", "training_progress.json")
 HEARTBEAT_INTERVAL = 300
 
 
