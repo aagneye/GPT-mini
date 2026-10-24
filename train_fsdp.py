@@ -31,6 +31,7 @@ from datetime import datetime
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
+import torch.nn.functional as F
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl,
     apply_activation_checkpointing,
@@ -377,7 +378,7 @@ def main():
             log(rank, f"[EVAL] step {step:,} | val loss {sum(vlosses)/len(vlosses):.4f}")
             model.train()
 
-        if is_main(rank) and step % 2000 == 0 and step > 0:
+        if step % 2000 == 0 and step > 0:
             _sample(model, tokenizer, device, rank)
 
         if time.time() - training_state["last_heartbeat"] > HEARTBEAT_INTERVAL:
@@ -404,16 +405,32 @@ def main():
     dist.destroy_process_group()
 
 
-def _sample(model, tokenizer, device, rank):
+def _sample(model, tokenizer, device, rank, max_new_tokens=50, temperature=0.8, top_k=40):
+    """Print a short sample. Collective: must be called on EVERY rank.
+
+    Runs the plain FSDP forward (no KV cache), so each step all-gathers params
+    exactly like training. Calling FSDP forwards or summon_full_params on rank 0
+    alone would leave the other ranks in mismatched collectives and hang.
+    Rank 0 picks each token and broadcasts it so all ranks share one context.
+    """
+    model.eval()
     try:
-        bos = tokenizer.sp.bos_id()
-        ctx = torch.tensor([[bos]], dtype=torch.long, device=device)
-        with FSDP.summon_full_params(model, writeback=False):
-            out = model.generate(ctx, max_new_tokens=50, temperature=0.8, top_k=40)
-        text = tokenizer.decode(out[0].tolist())
-        print(f"[SAMPLE] {text[:200]}", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"[SAMPLE] skipped ({e})", flush=True)
+        idx = torch.tensor([[tokenizer.sp.bos_id()]], dtype=torch.long, device=device)
+        with torch.no_grad():
+            for _ in range(max_new_tokens):
+                with torch.autocast("cuda", dtype=torch.float16):
+                    logits, _ = model(idx[:, -cfg.block_size:])
+                logits = logits[:, -1, :].float() / temperature
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("inf")
+                next_tok = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+                dist.broadcast(next_tok, src=0)
+                idx = torch.cat((idx, next_tok), dim=1)
+        if is_main(rank):
+            text = tokenizer.decode(idx[0].tolist())
+            print(f"[SAMPLE] {text[:200]}", flush=True)
+    finally:
+        model.train()
 
 
 def _heartbeat(rank, step, state, tokens_per_step, device):
