@@ -300,6 +300,7 @@ def main():
         try:
             load_sharded_checkpoint(model, optimizer, manifest["dir"])
             start_step = int(manifest["step"]) + 1
+            train_loader.reseed(start_step)
             log(rank, f"Resumed from {manifest['dir']} at step {start_step}")
         except Exception as e:  # noqa: BLE001 - report and start fresh
             log(rank, f"Could not resume from manifest ({e}); starting fresh.")

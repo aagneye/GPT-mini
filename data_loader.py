@@ -73,8 +73,17 @@ class DataLoader:
         self.device = device
         self.rank = rank
         self.world_size = world_size
+        self.seed = seed
         # Per-rank RNG so ranks sample different windows.
         self.rng = np.random.default_rng(seed + rank)
+
+    def reseed(self, step: int):
+        """Start a fresh per-rank stream for a run resumed at ``step``.
+
+        Without this a resumed run replays exactly the batches it drew from
+        step 0, since the RNG state is not checkpointed.
+        """
+        self.rng = np.random.default_rng([self.seed, self.rank, step])
 
     def get_batch(self):
         bs, bl = self.batch_size, self.block_size
