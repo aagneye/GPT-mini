@@ -130,6 +130,8 @@ else
 fi
 
 # ---------- 3) Smoke test (200 steps) ----------
+# Short run that hits every collective path (train, eval, sample, sharded
+# save + prune) before committing to the multi-day pretrain.
 SMOKE_MARKER="${LOG_DIR}/smoke.ok"
 if [[ ! -f "${SMOKE_MARKER}" ]]; then
   log "Smoke test: 200 steps on ${NPROC} GPUs"
@@ -137,7 +139,8 @@ if [[ ! -f "${SMOKE_MARKER}" ]]; then
   GPT_PROFILE=t4_1b \
   GPT_MAX_ITERS=200 \
   GPT_SAVE_INTERVAL=100 \
-  GPT_EVAL_INTERVAL=200 \
+  GPT_EVAL_INTERVAL=100 \
+  GPT_SAMPLE_INTERVAL=100 \
   GPT_CHECKPOINT_DIR="${STORE}/checkpoints_fsdp_smoke" \
   GPT_PROGRESS_FILE="${LOG_DIR}/smoke_progress.json" \
   torchrun --standalone --nproc_per_node="${NPROC}" train_fsdp.py \

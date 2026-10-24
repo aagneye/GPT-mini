@@ -84,6 +84,7 @@ elif _on_amd_cloud:
 else:
     max_iters = _env_int("GPT_MAX_ITERS", 40000)
 eval_interval = _env_int("GPT_EVAL_INTERVAL", 2000 if _on_t4_1b else 200)
+sample_interval = _env_int("GPT_SAMPLE_INTERVAL", 2000)
 learning_rate = _env_float("GPT_LEARNING_RATE", 2e-4 if _on_t4_1b else 3e-4)
 gradient_accumulation_steps = _env_int(
     "GPT_GRAD_ACCUM_STEPS",

@@ -398,7 +398,7 @@ def main():
             log(rank, f"[EVAL] step {step:,} | val loss {sum(vlosses)/len(vlosses):.4f}")
             model.train()
 
-        if step % 2000 == 0 and step > 0:
+        if step % cfg.sample_interval == 0 and step > 0:
             _sample(model, tokenizer, device, rank)
 
         if time.time() - training_state["last_heartbeat"] > HEARTBEAT_INTERVAL:
