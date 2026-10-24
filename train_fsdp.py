@@ -96,17 +96,37 @@ def get_lr(step, peak_lr, warmup_steps, max_iters, min_lr_ratio):
 # Weight decay grouping
 # =====================
 
-def build_optimizer(model, peak_lr, weight_decay, beta1, beta2):
+_WRAPPER_PREFIXES = ("_fsdp_wrapped_module.", "_checkpoint_wrapped_module.")
+
+
+def clean_param_name(name):
+    for prefix in _WRAPPER_PREFIXES:
+        name = name.replace(prefix, "")
+    return name
+
+
+def decay_param_names(model):
+    """Names of 2D params (matmuls, embeddings) that get weight decay.
+
+    Must be called on the UNWRAPPED model: after FSDP wrapping with
+    use_orig_params=True each param is a flattened 1D shard, so dim() no longer
+    reflects the real shape.
+    """
+    return {name for name, p in model.named_parameters() if p.dim() >= 2}
+
+
+def build_optimizer(model, decay_names, peak_lr, weight_decay, beta1, beta2):
     decay, no_decay = [], []
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-        # 2D params (matmuls, embeddings) get weight decay; biases and
-        # LayerNorm (1D) do not.
-        if p.dim() >= 2:
+        # Biases and LayerNorm weights (1D) do not get weight decay.
+        if clean_param_name(name) in decay_names:
             decay.append(p)
         else:
             no_decay.append(p)
+    if not decay:
+        raise RuntimeError("No parameters matched the weight-decay group; check wrapper prefixes.")
     groups = [
         {"params": decay, "weight_decay": weight_decay},
         {"params": no_decay, "weight_decay": 0.0},
@@ -200,6 +220,7 @@ def main():
     model = GPT(gpt_config)
     if is_main(rank):
         print(f"Model params (unsharded): {model.num_params():,}", flush=True)
+    decay_names = decay_param_names(model)
 
     auto_wrap_policy = functools.partial(
         transformer_auto_wrap_policy, transformer_layer_cls={Block}
@@ -233,7 +254,7 @@ def main():
         )
 
     optimizer = build_optimizer(
-        model, cfg.learning_rate, cfg.weight_decay, cfg.beta1, cfg.beta2
+        model, decay_names, cfg.learning_rate, cfg.weight_decay, cfg.beta1, cfg.beta2
     )
     scaler = ShardedGradScaler()
 
