@@ -3,12 +3,15 @@
 set -euo pipefail
 
 ROOT="/data/.gpt-mini-1b"
-MNT="/mnt/gpt-mini-1b"
-LOG_DIR="${MNT}/logs"
-DATA_DIR="${MNT}/data/fineweb_edu"
-SAMPLE_TXT="${MNT}/data/fineweb_sample.txt"
+# Data, logs and checkpoints live on the persistent OS disk. The Azure NC
+# ephemeral disk at /mnt is wiped on every VM deallocate, which would lose the
+# tokenized corpus and all training progress.
+STORE="${GPT_STORAGE_ROOT:-/data/gpt-mini-1b}"
+LOG_DIR="${STORE}/logs"
+DATA_DIR="${STORE}/data/fineweb_edu"
+SAMPLE_TXT="${STORE}/data/fineweb_sample.txt"
 SPM_MODEL="${ROOT}/tokenizer/spm32k.model"
-HF_HOME="${MNT}/hf-cache"
+HF_HOME="${STORE}/hf-cache"
 export HF_HOME
 export HF_DATASETS_CACHE="${HF_HOME}/datasets"
 export TRANSFORMERS_CACHE="${HF_HOME}/transformers"
@@ -19,7 +22,7 @@ export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export PYTHONUNBUFFERED=1
 
-mkdir -p "${LOG_DIR}" "${DATA_DIR}" "$(dirname "${SAMPLE_TXT}")" "${ROOT}/checkpoints_fsdp"
+mkdir -p "${LOG_DIR}" "${DATA_DIR}" "$(dirname "${SAMPLE_TXT}")" "${STORE}/checkpoints_fsdp" "${ROOT}/data"
 cd "${ROOT}"
 # shellcheck disable=SC1091
 source .venv/bin/activate
@@ -35,10 +38,18 @@ trap on_err ERR
 
 log "=== 1B pipeline start | GPUs=$(python -c 'import torch; print(torch.cuda.device_count())') ==="
 
-# Symlink heavy dirs onto /mnt so the repo stays light on /
-ln -sfn "${MNT}/checkpoints_fsdp" "${ROOT}/checkpoints_fsdp" || true
-ln -sfn "${DATA_DIR}" "${ROOT}/data/fineweb_edu" || true
-mkdir -p "${ROOT}/data"
+# Convenience symlinks from the repo into ${STORE}. Training gets explicit
+# paths via env vars, so a real directory already sitting at the link path is
+# left alone (ln -sfn would otherwise nest the link inside it).
+link_dir() {
+  if [[ -e "$2" && ! -L "$2" ]]; then
+    log "Not linking $2 -> $1: a real directory is already there"
+  else
+    ln -sfn "$1" "$2"
+  fi
+}
+link_dir "${STORE}/checkpoints_fsdp" "${ROOT}/checkpoints_fsdp"
+link_dir "${DATA_DIR}" "${ROOT}/data/fineweb_edu"
 
 # ---------- 1) Tokenizer sample (~2GB text) ----------
 if [[ ! -f "${SPM_MODEL}" ]]; then
@@ -96,7 +107,7 @@ if [[ ! -f "${DATA_DIR}/index.json" ]]; then
     log "Moving incomplete shards aside -> ${bak}"
     mv "${DATA_DIR}" "${bak}"
     mkdir -p "${DATA_DIR}"
-    ln -sfn "${DATA_DIR}" "${ROOT}/data/fineweb_edu" || true
+    link_dir "${DATA_DIR}" "${ROOT}/data/fineweb_edu"
   fi
   log "Tokenizing FineWeb-Edu sample-10BT -> ${DATA_DIR}"
   # 32 workers + spawn is more stable than 48 fork workers with HF streaming.
@@ -115,12 +126,12 @@ fi
 SMOKE_MARKER="${LOG_DIR}/smoke.ok"
 if [[ ! -f "${SMOKE_MARKER}" ]]; then
   log "Smoke test: 200 steps on 4 GPUs"
-  mkdir -p "${MNT}/checkpoints_fsdp_smoke"
+  mkdir -p "${STORE}/checkpoints_fsdp_smoke"
   GPT_PROFILE=t4_1b \
   GPT_MAX_ITERS=200 \
   GPT_SAVE_INTERVAL=100 \
   GPT_EVAL_INTERVAL=200 \
-  GPT_CHECKPOINT_DIR="${MNT}/checkpoints_fsdp_smoke" \
+  GPT_CHECKPOINT_DIR="${STORE}/checkpoints_fsdp_smoke" \
   GPT_PROGRESS_FILE="${LOG_DIR}/smoke_progress.json" \
   torchrun --standalone --nproc_per_node=4 train_fsdp.py \
     2>&1 | tee "${LOG_DIR}/smoke.log"
@@ -132,11 +143,9 @@ fi
 
 # ---------- 4) Full pretrain (20k steps) ----------
 log "Starting FULL pretrain (20,000 steps). Detach and monitor logs."
-mkdir -p "${MNT}/checkpoints_fsdp"
-ln -sfn "${MNT}/checkpoints_fsdp" "${ROOT}/checkpoints_fsdp"
 
 GPT_PROFILE=t4_1b \
-GPT_CHECKPOINT_DIR="${MNT}/checkpoints_fsdp" \
+GPT_CHECKPOINT_DIR="${STORE}/checkpoints_fsdp" \
 GPT_PROGRESS_FILE="${LOG_DIR}/training_progress.json" \
 torchrun --standalone --nproc_per_node=4 train_fsdp.py \
   2>&1 | tee -a "${LOG_DIR}/pretrain.log"
