@@ -23,6 +23,7 @@ import functools
 import json
 import math
 import os
+import shutil
 import signal
 import sys
 import time
@@ -171,6 +172,24 @@ def save_sharded_checkpoint(model, optimizer, step):
     state = {"model": model_sd, "optim": optim_sd, "step": step}
     dcp.save(state, checkpoint_id=ckpt_dir)
     return ckpt_subdir
+
+
+def prune_checkpoints(keep, current_subdir):
+    """Delete all but the newest ``keep`` step_* dirs (rank 0 only).
+
+    A 1B sharded checkpoint (fp32 params + AdamW moments) is ~13 GB, so keeping
+    every save_interval checkpoint would fill the disk long before training ends.
+    The checkpoint the manifest points at is never deleted.
+    """
+    steps = []
+    for name in os.listdir(CHECKPOINT_DIR):
+        path = os.path.join(CHECKPOINT_DIR, name)
+        if name.startswith("step_") and name[5:].isdigit() and os.path.isdir(path):
+            steps.append((int(name[5:]), name))
+    steps.sort()
+    for _, name in steps[: max(0, len(steps) - max(1, keep))]:
+        if name != current_subdir:
+            shutil.rmtree(os.path.join(CHECKPOINT_DIR, name), ignore_errors=True)
 
 
 def load_sharded_checkpoint(model, optimizer, ckpt_subdir):
@@ -392,6 +411,7 @@ def main():
             if is_main(rank):
                 write_manifest(step, subdir, gpt_config, vocab_size)
                 save_progress(step)
+                prune_checkpoints(cfg.keep_last_checkpoints, subdir)
                 print(f"Saved sharded checkpoint: {subdir}", flush=True)
 
     # Final checkpoint.
@@ -400,6 +420,7 @@ def main():
     if is_main(rank):
         write_manifest(cfg.max_iters - 1, subdir, gpt_config, vocab_size)
         save_progress(cfg.max_iters - 1)
+        prune_checkpoints(cfg.keep_last_checkpoints, subdir)
         print("Training complete.", flush=True)
 
     dist.destroy_process_group()
