@@ -10,7 +10,14 @@ mkdir -p data "${STORE}/logs"
 if tmux has-session -t gpt1b 2>/dev/null; then
   tmux kill-session -t gpt1b
 fi
-tmux new-session -d -s gpt1b -c /data/.gpt-mini-1b -e "GPT_STORAGE_ROOT=${STORE}" 'bash scripts/run_1b_pipeline.sh'
+tmux_env=(-e "GPT_STORAGE_ROOT=${STORE}")
+# Forward GPU selection only when set: an empty CUDA_VISIBLE_DEVICES hides every GPU.
+for var in CUDA_VISIBLE_DEVICES GPT_NPROC; do
+  if [[ -n "${!var:-}" ]]; then
+    tmux_env+=(-e "${var}=${!var}")
+  fi
+done
+tmux new-session -d -s gpt1b -c /data/.gpt-mini-1b "${tmux_env[@]}" 'bash scripts/run_1b_pipeline.sh'
 sleep 4
 tmux ls
 echo '--- log ---'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full 1B pretrain pipeline on 4x T4. Detach-safe (tmux/nohup).
+# Full 1B pretrain pipeline on the visible T4s (4x by default). Detach-safe (tmux/nohup).
 set -euo pipefail
 
 ROOT="/data/.gpt-mini-1b"
@@ -36,7 +36,14 @@ on_err() {
 }
 trap on_err ERR
 
-log "=== 1B pipeline start | GPUs=$(python -c 'import torch; print(torch.cuda.device_count())') ==="
+# One rank per visible GPU. To leave a busy GPU alone, export
+# CUDA_VISIBLE_DEVICES (e.g. 0,2,3) before launching; GPT_NPROC overrides.
+NPROC="${GPT_NPROC:-$(python -c 'import torch; print(torch.cuda.device_count())')}"
+if (( NPROC < 1 )); then
+  log "No CUDA GPUs visible; refusing to start"
+  exit 1
+fi
+log "=== 1B pipeline start | GPUs=${NPROC} | CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-all} ==="
 
 # Convenience symlinks from the repo into ${STORE}. Training gets explicit
 # paths via env vars, so a real directory already sitting at the link path is
@@ -125,7 +132,7 @@ fi
 # ---------- 3) Smoke test (200 steps) ----------
 SMOKE_MARKER="${LOG_DIR}/smoke.ok"
 if [[ ! -f "${SMOKE_MARKER}" ]]; then
-  log "Smoke test: 200 steps on 4 GPUs"
+  log "Smoke test: 200 steps on ${NPROC} GPUs"
   mkdir -p "${STORE}/checkpoints_fsdp_smoke"
   GPT_PROFILE=t4_1b \
   GPT_MAX_ITERS=200 \
@@ -133,7 +140,7 @@ if [[ ! -f "${SMOKE_MARKER}" ]]; then
   GPT_EVAL_INTERVAL=200 \
   GPT_CHECKPOINT_DIR="${STORE}/checkpoints_fsdp_smoke" \
   GPT_PROGRESS_FILE="${LOG_DIR}/smoke_progress.json" \
-  torchrun --standalone --nproc_per_node=4 train_fsdp.py \
+  torchrun --standalone --nproc_per_node="${NPROC}" train_fsdp.py \
     2>&1 | tee "${LOG_DIR}/smoke.log"
   touch "${SMOKE_MARKER}"
   log "Smoke test OK"
@@ -147,7 +154,7 @@ log "Starting FULL pretrain (20,000 steps). Detach and monitor logs."
 GPT_PROFILE=t4_1b \
 GPT_CHECKPOINT_DIR="${STORE}/checkpoints_fsdp" \
 GPT_PROGRESS_FILE="${LOG_DIR}/training_progress.json" \
-torchrun --standalone --nproc_per_node=4 train_fsdp.py \
+torchrun --standalone --nproc_per_node="${NPROC}" train_fsdp.py \
   2>&1 | tee -a "${LOG_DIR}/pretrain.log"
 
 log "=== Pretrain finished ==="
